@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Akashic - AI-Enhanced Editor</title>
+    <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Menu Bar -->
+        <div id="menu-bar">
+            <div class="menu-item" data-menu="file">File</div>
+            <div class="menu-item" data-menu="edit">Edit</div>
+            <div class="menu-item" data-menu="view">View</div>
+            <div class="menu-item" data-menu="ai">AI</div>
+            <div class="menu-item" data-menu="help">Help</div>
+        </div>
+        
+        <!-- Dropdown Menus -->
+        <div id="menu-dropdowns">
+            <div class="dropdown" id="menu-file">
+                <div class="menu-option" data-action="new">New <span class="shortcut">Ctrl+N</span></div>
+                <div class="menu-option" data-action="open">Open... <span class="shortcut">Ctrl+O</span></div>
+                <div class="menu-option" data-action="save">Save <span class="shortcut">Ctrl+S</span></div>
+                <div class="menu-option" data-action="save-as">Save As... <span class="shortcut">Ctrl+Shift+S</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-option" data-action="recent-files">Recent Files</div>
+                <div class="menu-separator"></div>
+                <div class="menu-option" data-action="exit">Exit</div>
+            </div>
+            
+            <div class="dropdown" id="menu-edit">
+                <div class="menu-option" data-action="undo">Undo <span class="shortcut">Ctrl+Z</span></div>
+                <div class="menu-option" data-action="redo">Redo <span class="shortcut">Ctrl+Y</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-option" data-action="cut">Cut <span class="shortcut">Ctrl+X</span></div>
+                <div class="menu-option" data-action="copy">Copy <span class="shortcut">Ctrl+C</span></div>
+                <div class="menu-option" data-action="paste">Paste <span class="shortcut">Ctrl+V</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-option" data-action="find">Find <span class="shortcut">Ctrl+F</span></div>
+                <div class="menu-option" data-action="replace">Replace <span class="shortcut">Ctrl+H</span></div>
+                <div class="menu-option" data-action="go-to">Go To Line <span class="shortcut">Ctrl+G</span></div>
+            </div>
+            
+            <div class="dropdown" id="menu-view">
+                <div class="menu-option" data-action="word-wrap">Word Wrap</div>
+                <div class="menu-option" data-action="line-numbers">Line Numbers</div>
+                <div class="menu-option" data-action="minimap">Minimap</div>
+                <div class="menu-separator"></div>
+                <div class="menu-option" data-action="zoom-in">Zoom In <span class="shortcut">Ctrl++</span></div>
+                <div class="menu-option" data-action="zoom-out">Zoom Out <span class="shortcut">Ctrl+-</span></div>
+                <div class="menu-option" data-action="reset-zoom">Reset Zoom <span class="shortcut">Ctrl+0</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-option" data-action="dark-mode">Dark Mode</div>
+                <div class="menu-option" data-action="fullscreen">Fullscreen <span class="shortcut">F11</span></div>
+            </div>
+            
+            <div class="dropdown" id="menu-ai">
+                <div class="menu-option" data-action="ai-sidebar">Toggle AI Sidebar <span class="shortcut">Ctrl+Shift+A</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-option" data-action="ai-rewrite">Rewrite Selection</div>
+                <div class="menu-option" data-action="ai-summarize">Summarize Selection</div>
+                <div class="menu-option" data-action="ai-grammar">Fix Grammar</div>
+                <div class="menu-option" data-action="ai-expand">Expand Notes</div>
+                <div class="menu-option" data-action="ai-continue">Continue Writing</div>
+            </div>
+            
+            <div class="dropdown" id="menu-help">
+                <div class="menu-option" data-action="about">About Akashic</div>
+                <div class="menu-option" data-action="shortcuts">Keyboard Shortcuts</div>
+            </div>
+        </div>
+        
+        <!-- Tab Bar -->
+        <div id="tab-bar">
+            <div id="tabs-container"></div>
+            <div id="new-tab-btn" title="New File">+</div>
+        </div>
+        
+        <!-- Main Content -->
+        <div id="main-content">
+            <!-- Editor Container -->
+            <div id="editor-container"></div>
+            
+            <!-- AI Sidebar (hidden by default) -->
+            <div id="ai-sidebar" class="hidden">
+                <!-- Compact Header -->
+                <div class="ai-header">
+                    <div class="ai-header-top">
+                        <div class="ai-title">
+                            <span class="ai-icon">✨</span>
+                            <span>AI Assistant</span>
+                        </div>
+                        <button id="close-ai-sidebar" class="ai-close-btn">×</button>
+                    </div>
+                    <div class="ai-header-bottom">
+                        <div class="ai-status-bar">
+                            <span id="ai-status-indicator" class="status-dot offline"></span>
+                            <span id="ai-status-text">Ollama not connected</span>
+                        </div>
+                        <div class="ai-model-wrapper">
+                            <select id="ai-model" class="ai-model-select">
+                                <option value="">Select model...</option>
+                            </select>
+                            <button id="refresh-models" class="ai-refresh-btn" title="Refresh models">↻</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Messages Area -->
+                <div class="ai-chat-container">
+                    <div id="ai-messages" class="ai-messages">
+                        <div class="ai-welcome">
+                            <div class="ai-welcome-icon">🤖</div>
+                            <h3>How can I help you today?</h3>
+                            <p>I can help you write, edit, explain code, summarize text, and more.</p>
+                            <div class="ai-suggestions">
+                                <button class="ai-suggestion" data-prompt="Explain this code">💡 Explain code</button>
+                                <button class="ai-suggestion" data-prompt="Rewrite this to be more professional">✍️ Rewrite professionally</button>
+                                <button class="ai-suggestion" data-prompt="Summarize this text">📝 Summarize</button>
+                                <button class="ai-suggestion" data-prompt="Fix grammar and spelling">🔧 Fix grammar</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="ai-input-container">
+                    <div class="ai-input-wrapper">
+                        <textarea 
+                            id="ai-prompt" 
+                            class="ai-input" 
+                            placeholder="Message AI..." 
+                            rows="1"
+                        ></textarea>
+                        <button id="ai-send" class="ai-send-btn" disabled>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="ai-input-actions">
+                        <button id="ai-insert" class="ai-action-btn" title="Insert at cursor">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 5v14M5 12h14"/>
+                            </svg>
+                            Insert
+                        </button>
+                        <button id="ai-replace" class="ai-action-btn" title="Replace selection">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M4 4h16v16H4zM9 9h6v6H9z"/>
+                            </svg>
+                            Replace
+                        </button>
+                        <button id="start-ollama-server" class="ai-action-btn ai-start-btn hidden">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M5 3l14 9-14 9V3z"/>
+                            </svg>
+                            Start Server
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Setup Panel (shown when not configured) -->
+                <div id="ai-setup-panel" class="ai-setup-panel hidden">
+                    <div class="ai-setup-content">
+                        <div class="ai-setup-icon">🔧</div>
+                        <h4>Setup Required</h4>
+                        <p>Ollama is not installed or not running on your system.</p>
+                        <a href="https://ollama.com/download" target="_blank" class="ai-download-link">
+                            Download Ollama
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M7 17L17 7M17 7H7M17 7v10"/>
+                            </svg>
+                        </a>
+                        <button id="check-ollama-again" class="ai-check-btn">Check Again</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Status Bar -->
+        <div id="status-bar">
+            <div class="status-left">
+                <span id="status-file">Ready</span>
+            </div>
+            <div class="status-right">
+                <span id="status-encoding">UTF-8</span>
+                <span id="status-line-ending">CRLF</span>
+                <span id="status-position">Ln 1, Col 1</span>
+                <span id="status-zoom">100%</span>
+            </div>
+        </div>
+        
+        <!-- Context Menu -->
+        <div id="context-menu" class="hidden">
+            <div class="context-item" data-action="cut">Cut</div>
+            <div class="context-item" data-action="copy">Copy</div>
+            <div class="context-item" data-action="paste">Paste</div>
+            <div class="context-separator"></div>
+            <div class="context-item" data-action="ai-rewrite">✨ Rewrite</div>
+            <div class="context-item" data-action="ai-summarize">✨ Summarize</div>
+            <div class="context-item" data-action="ai-grammar">✨ Fix Grammar</div>
+            <div class="context-item" data-action="ai-explain">✨ Explain</div>
+        </div>
+        
+        <!-- Dialogs -->
+        <div id="dialog-overlay" class="hidden">
+            <div id="dialog-find-replace" class="dialog hidden">
+                <div class="dialog-header">Find and Replace</div>
+                <div class="dialog-body">
+                    <input type="text" id="find-replace-input" placeholder="Find...">
+                    <div id="replace-section">
+                        <input type="text" id="replace-input" placeholder="Replace with..." style="margin-top: 10px;">
+                    </div>
+                </div>
+                <div class="dialog-footer">
+                    <button id="find-prev-btn">Previous</button>
+                    <button id="find-next-btn">Next</button>
+                    <button id="replace-one-btn">Replace</button>
+                    <button id="replace-all-btn">Replace All</button>
+                    <button id="find-close">Close</button>
+                </div>
+            </div>
+            
+            <div id="dialog-goto" class="dialog hidden">
+                <div class="dialog-header">Go To Line</div>
+                <div class="dialog-body">
+                    <input type="number" id="goto-input" placeholder="Line number..." min="1">
+                </div>
+                <div class="dialog-footer">
+                    <button id="goto-ok">Go</button>
+                    <button id="goto-cancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="./src/main.js" type="module"></script>
+</body>
+</html>
