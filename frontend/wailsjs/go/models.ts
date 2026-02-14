@@ -22,6 +22,26 @@ export namespace main {
 	        this.availableModels = source["availableModels"];
 	    }
 	}
+	export class Chat {
+	    id: number;
+	    title: string;
+	    modelName: string;
+	    createdAt: string;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Chat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.modelName = source["modelName"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
 	export class EditorEventData {
 	    filePath: string;
 	    selection?: string;
@@ -129,6 +149,26 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class Message {
+	    id: number;
+	    chatId: number;
+	    role: string;
+	    content: string;
+	    createdAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Message(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.chatId = source["chatId"];
+	        this.role = source["role"];
+	        this.content = source["content"];
+	        this.createdAt = source["createdAt"];
+	    }
 	}
 	export class OllamaModel {
 	    name: string;

@@ -11,9 +11,21 @@ import {
     OnFileChange,
     Greet,
     CheckOllamaInstalled,
+    CheckOllamaServerRunning,
     GetInstalledModels,
     StartOllamaServer,
-    GenerateWithOllama
+    GenerateWithOllama,
+    CreateChat,
+    GetChats,
+    GetChatMessages,
+    DeleteChat,
+    DeleteAllChats,
+    UpdateChatTitle,
+    AddMessage,
+    GetChatContext,
+    RenameChatFromFirstMessage,
+    SearchChats,
+    ExportChat
 } from '../wailsjs/go/main/App.js';
 
 console.log('Akashic Editor Starting...');
@@ -28,6 +40,13 @@ class AkashicEditor {
         this.installedModels = [];
         this.selectedModel = '';
         this.serverRunning = false;
+        this.currentGeneration = null;
+        this.lastAIResponse = '';
+        
+        // Chat history state
+        this.currentChatId = null;
+        this.chats = [];
+        this.isLoadingChat = false;
         
         // Wait for DOM
         if (document.readyState === 'loading') {
@@ -52,7 +71,13 @@ class AkashicEditor {
             statusPosition: document.getElementById('status-position'),
             statusZoom: document.getElementById('status-zoom'),
             contextMenu: document.getElementById('context-menu'),
-            dialogOverlay: document.getElementById('dialog-overlay')
+            dialogOverlay: document.getElementById('dialog-overlay'),
+            // Chat history elements
+            chatHistoryPanel: document.getElementById('chat-history-panel'),
+            chatList: document.getElementById('chat-list'),
+            chatSearch: document.getElementById('chat-search'),
+            currentChatTitle: document.getElementById('current-chat-title'),
+            chatInfo: document.getElementById('chat-info')
         };
         
         // Verify critical elements
@@ -66,6 +91,7 @@ class AkashicEditor {
         this.setupKeyboardShortcuts();
         this.setupEventListeners();
         this.setupAIEventListeners();
+        this.setupChatHistoryListeners();
         
         // Create initial tab
         this.createNewTab();
@@ -80,7 +106,390 @@ class AkashicEditor {
             }
         }
         
+        // Load chat history
+        await this.loadChatHistory();
+        
         console.log('Editor initialized successfully');
+    }
+    
+    // ============================================
+    // Chat History Management
+    // ============================================
+    
+    async loadChatHistory() {
+        try {
+            this.chats = await GetChats();
+            this.renderChatList();
+        } catch (err) {
+            console.error('Failed to load chat history:', err);
+        }
+    }
+    
+    renderChatList() {
+        if (!this.elements.chatList) return;
+        
+        this.elements.chatList.innerHTML = '';
+        
+        if (this.chats.length === 0) {
+            this.elements.chatList.innerHTML = `
+                <div class="chat-empty">
+                    <p>No chats yet</p>
+                    <span>Start a new conversation</span>
+                </div>
+            `;
+            return;
+        }
+        
+        this.chats.forEach(chat => {
+            const chatItem = document.createElement('div');
+            chatItem.className = 'chat-item';
+            chatItem.dataset.chatId = chat.id;
+            
+            if (chat.id === this.currentChatId) {
+                chatItem.classList.add('active');
+            }
+            
+            const date = new Date(chat.updatedAt);
+            const timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            chatItem.innerHTML = `
+                <div class="chat-item-content">
+                    <div class="chat-item-title">${this.escapeHtml(chat.title)}</div>
+                    <div class="chat-item-meta">
+                        <span class="chat-item-model">${chat.modelName}</span>
+                        <span class="chat-item-time">${timeStr}</span>
+                    </div>
+                </div>
+                <button class="chat-item-delete" title="Delete chat">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            `;
+            
+            // Click to load chat
+            chatItem.querySelector('.chat-item-content').addEventListener('click', () => {
+                this.loadChat(chat.id);
+            });
+            
+            // Delete button
+            chatItem.querySelector('.chat-item-delete').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.deleteChat(chat.id);
+            });
+            
+            this.elements.chatList.appendChild(chatItem);
+        });
+    }
+    
+    async createNewChat() {
+        try {
+            const title = 'New Chat';
+            const chat = await CreateChat(title, this.selectedModel || 'default');
+            this.currentChatId = chat.id;
+            this.chats.unshift(chat);
+            
+            // Clear messages
+            const messagesDiv = document.getElementById('ai-messages');
+            messagesDiv.innerHTML = `
+                <div class="ai-welcome">
+                    <div class="ai-welcome-icon">🤖</div>
+                    <h3>How can I help you today?</h3>
+                    <p>I can help you write, edit, explain code, summarize text, and more.</p>
+                    <div class="ai-suggestions">
+                        <button class="ai-suggestion" data-prompt="Explain this code">💡 Explain code</button>
+                        <button class="ai-suggestion" data-prompt="Rewrite this to be more professional">✍️ Rewrite professionally</button>
+                        <button class="ai-suggestion" data-prompt="Summarize this text">📝 Summarize</button>
+                        <button class="ai-suggestion" data-prompt="Fix grammar and spelling">🔧 Fix grammar</button>
+                    </div>
+                </div>
+            `;
+            
+            // Re-attach suggestion listeners
+            messagesDiv.querySelectorAll('.ai-suggestion').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const prompt = btn.dataset.prompt;
+                    document.getElementById('ai-prompt').value = prompt;
+                    this.generateWithAI();
+                });
+            });
+            
+            this.renderChatList();
+            this.updateChatInfo();
+        } catch (err) {
+            console.error('Failed to create chat:', err);
+            this.showNotification('Failed to create chat', 'error');
+        }
+    }
+    
+    async loadChat(chatId) {
+        if (this.isLoadingChat) return;
+        this.isLoadingChat = true;
+        
+        try {
+            this.currentChatId = chatId;
+            const messages = await GetChatMessages(chatId);
+            
+            // Clear current messages
+            const messagesDiv = document.getElementById('ai-messages');
+            messagesDiv.innerHTML = '';
+            
+            if (messages.length === 0) {
+                // Show welcome if no messages
+                messagesDiv.innerHTML = `
+                    <div class="ai-welcome">
+                        <div class="ai-welcome-icon">🤖</div>
+                        <h3>How can I help you today?</h3>
+                        <p>I can help you write, edit, explain code, summarize text, and more.</p>
+                    </div>
+                `;
+            } else {
+                // Render messages
+                messages.forEach(msg => {
+                    const msgDiv = document.createElement('div');
+                    msgDiv.className = `ai-message ${msg.role}`;
+                    msgDiv.innerHTML = `<div class="ai-message-content">${this.escapeHtml(msg.content)}</div>`;
+                    messagesDiv.appendChild(msgDiv);
+                });
+                
+                // Scroll to bottom
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+            
+            // Update chat info
+            const chat = this.chats.find(c => c.id === chatId);
+            if (chat) {
+                this.selectedModel = chat.modelName;
+                document.getElementById('ai-model').value = chat.modelName;
+            }
+            
+            this.renderChatList();
+            this.updateChatInfo();
+        } catch (err) {
+            console.error('Failed to load chat:', err);
+            this.showNotification('Failed to load chat', 'error');
+        } finally {
+            this.isLoadingChat = false;
+        }
+    }
+    
+    async deleteChat(chatId) {
+        const chat = this.chats.find(c => c.id === chatId);
+        const chatTitle = chat ? chat.title : 'this chat';
+        
+        this.showStyledConfirmDialog(
+            'Delete Chat',
+            `Are you sure you want to delete "${chatTitle}"?`,
+            'Delete',
+            'Cancel',
+            async () => {
+                try {
+                    await DeleteChat(chatId);
+                    this.chats = this.chats.filter(c => c.id !== chatId);
+                    
+                    if (this.currentChatId === chatId) {
+                        this.currentChatId = null;
+                        // Clear messages
+                        const messagesDiv = document.getElementById('ai-messages');
+                        messagesDiv.innerHTML = `
+                            <div class="ai-welcome">
+                                <div class="ai-welcome-icon">🤖</div>
+                                <h3>How can I help you today?</h3>
+                            </div>
+                        `;
+                        this.updateChatInfo();
+                    }
+                    
+                    this.renderChatList();
+                    this.showNotification('Chat deleted', 'success');
+                } catch (err) {
+                    console.error('Failed to delete chat:', err);
+                    this.showNotification('Failed to delete chat', 'error');
+                }
+            }
+        );
+    }
+    
+    async clearAllChats() {
+        this.showStyledConfirmDialog(
+            'Clear All Chats',
+            `Are you sure you want to delete ALL ${this.chats.length} chat(s)? This action cannot be undone.`,
+            'Delete All',
+            'Cancel',
+            async () => {
+                try {
+                    await DeleteAllChats();
+                    this.chats = [];
+                    this.currentChatId = null;
+                    
+                    // Clear messages
+                    const messagesDiv = document.getElementById('ai-messages');
+                    messagesDiv.innerHTML = `
+                        <div class="ai-welcome">
+                            <div class="ai-welcome-icon">🤖</div>
+                            <h3>How can I help you today?</h3>
+                        </div>
+                    `;
+                    
+                    this.renderChatList();
+                    this.updateChatInfo();
+                    this.showNotification('All chats cleared', 'success');
+                } catch (err) {
+                    console.error('Failed to clear chats:', err);
+                    this.showNotification('Failed to clear chats', 'error');
+                }
+            }
+        );
+    }
+    
+    async searchChats(query) {
+        if (!query.trim()) {
+            await this.loadChatHistory();
+            return;
+        }
+        
+        try {
+            this.chats = await SearchChats(query);
+            this.renderChatList();
+        } catch (err) {
+            console.error('Failed to search chats:', err);
+        }
+    }
+    
+    async renameCurrentChat() {
+        if (!this.currentChatId) return;
+        
+        const chat = this.chats.find(c => c.id === this.currentChatId);
+        if (!chat) return;
+        
+        this.showRenameChatDialog(chat.title, async (newTitle) => {
+            if (!newTitle || newTitle === chat.title) return;
+            
+            try {
+                await UpdateChatTitle(this.currentChatId, newTitle);
+                chat.title = newTitle;
+                this.renderChatList();
+                this.updateChatInfo();
+                this.showNotification('Chat renamed', 'success');
+            } catch (err) {
+                console.error('Failed to rename chat:', err);
+                this.showNotification('Failed to rename chat', 'error');
+            }
+        });
+    }
+    
+    showRenameChatDialog(currentTitle, onConfirm) {
+        this.elements.dialogOverlay.classList.remove('hidden');
+        
+        const dialogId = 'dialog-rename-chat';
+        let dialog = document.getElementById(dialogId);
+        if (!dialog) {
+            dialog = document.createElement('div');
+            dialog.id = dialogId;
+            dialog.className = 'dialog hidden';
+            dialog.style.width = '350px';
+            dialog.innerHTML = `
+                <div class="dialog-header" style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px;">✏️</span>
+                    <span>Rename Chat</span>
+                </div>
+                <div class="dialog-body" style="padding: 20px;">
+                    <input type="text" id="rename-chat-input" placeholder="Enter chat name..." style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-tertiary); color: var(--text-primary); font-size: 14px;">
+                </div>
+                <div class="dialog-footer" style="justify-content: flex-end; gap: 10px; padding: 15px 20px;">
+                    <button id="rename-chat-cancel" style="padding: 6px 16px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">Cancel</button>
+                    <button id="rename-chat-save" style="padding: 6px 16px; background: var(--accent-color); color: white; border: none; border-radius: 4px; cursor: pointer;">Save</button>
+                </div>
+            `;
+            this.elements.dialogOverlay.appendChild(dialog);
+        }
+        
+        const input = document.getElementById('rename-chat-input');
+        input.value = currentTitle;
+        
+        dialog.classList.remove('hidden');
+        
+        // Focus and select text
+        setTimeout(() => {
+            input.focus();
+            input.select();
+        }, 10);
+        
+        const saveBtn = document.getElementById('rename-chat-save');
+        const cancelBtn = document.getElementById('rename-chat-cancel');
+        
+        // Remove old listeners
+        const newSaveBtn = saveBtn.cloneNode(true);
+        const newCancelBtn = cancelBtn.cloneNode(true);
+        saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+        
+        const closeDialog = () => {
+            this.hideDialogs();
+            dialog.classList.add('hidden');
+        };
+        
+        newSaveBtn.addEventListener('click', () => {
+            const newTitle = input.value.trim();
+            closeDialog();
+            if (onConfirm) onConfirm(newTitle);
+        });
+        
+        newCancelBtn.addEventListener('click', () => {
+            closeDialog();
+        });
+        
+        // Handle Enter key
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const newTitle = input.value.trim();
+                closeDialog();
+                if (onConfirm) onConfirm(newTitle);
+            } else if (e.key === 'Escape') {
+                closeDialog();
+            }
+        });
+    }
+    
+    updateChatInfo() {
+        if (!this.elements.chatInfo || !this.elements.currentChatTitle) return;
+        
+        if (this.currentChatId) {
+            const chat = this.chats.find(c => c.id === this.currentChatId);
+            if (chat) {
+                this.elements.currentChatTitle.textContent = chat.title;
+                this.elements.chatInfo.classList.remove('hidden');
+            }
+        } else {
+            this.elements.chatInfo.classList.add('hidden');
+        }
+    }
+    
+    setupChatHistoryListeners() {
+        // New chat button
+        const newChatBtn = document.getElementById('new-chat-btn');
+        if (newChatBtn) {
+            newChatBtn.addEventListener('click', () => this.createNewChat());
+        }
+        
+        // Clear all chats
+        const clearAllBtn = document.getElementById('clear-all-chats');
+        if (clearAllBtn) {
+            clearAllBtn.addEventListener('click', () => this.clearAllChats());
+        }
+        
+        // Search chats
+        if (this.elements.chatSearch) {
+            this.elements.chatSearch.addEventListener('input', (e) => {
+                this.searchChats(e.target.value);
+            });
+        }
+        
+        // Rename chat button
+        const renameBtn = document.getElementById('rename-chat-btn');
+        if (renameBtn) {
+            renameBtn.addEventListener('click', () => this.renameCurrentChat());
+        }
     }
     
     // ============================================
@@ -576,10 +985,15 @@ class AkashicEditor {
         this.elements.aiSidebar.classList.toggle('hidden');
         
         // Initialize AI when opening sidebar
-        if (isHidden && !this.ollamaStatus.checked) {
-            this.ollamaStatus.checked = true;
-            this.checkOllamaInstallation();
-            this.loadInstalledModels();
+        if (isHidden) {
+            if (!this.ollamaStatus.checked) {
+                this.ollamaStatus.checked = true;
+                this.checkOllamaInstallation();
+                this.loadInstalledModels();
+            } else {
+                // Re-check server status to update UI
+                this.checkServerStatus();
+            }
         }
     }
     
@@ -815,19 +1229,25 @@ class AkashicEditor {
             dialog = document.createElement('div');
             dialog.id = 'dialog-save-confirm';
             dialog.className = 'dialog dialog-confirm hidden';
+            dialog.style.width = '400px';
             dialog.innerHTML = `
-                <div class="dialog-header" id="save-confirm-title">Unsaved Changes</div>
-                <div class="dialog-body" id="save-confirm-message">Save changes?</div>
-                <div class="dialog-footer">
-                    <button id="save-confirm-save">Save</button>
-                    <button id="save-confirm-dontsave">Don't Save</button>
-                    <button id="save-confirm-cancel">Cancel</button>
+                <div class="dialog-header" id="save-confirm-title" style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px;">💾</span>
+                    <span>Unsaved Changes</span>
+                </div>
+                <div class="dialog-body" id="save-confirm-message" style="padding: 20px; text-align: center;">
+                    Save changes?
+                </div>
+                <div class="dialog-footer" style="justify-content: center; gap: 10px; padding: 15px 20px;">
+                    <button id="save-confirm-save" class="btn-primary" style="padding: 8px 20px; background: var(--accent-color); color: white; border: none; border-radius: 4px; cursor: pointer;">Save</button>
+                    <button id="save-confirm-dontsave" style="padding: 8px 20px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">Don't Save</button>
+                    <button id="save-confirm-cancel" style="padding: 8px 20px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">Cancel</button>
                 </div>
             `;
             this.elements.dialogOverlay.appendChild(dialog);
         }
         
-        document.getElementById('save-confirm-title').textContent = title;
+        document.getElementById('save-confirm-title').innerHTML = `<span style="font-size: 20px;">💾</span><span>${title}</span>`;
         document.getElementById('save-confirm-message').textContent = message;
         
         dialog.classList.remove('hidden');
@@ -855,6 +1275,67 @@ class AkashicEditor {
         });
         
         newCancelBtn.addEventListener('click', () => {
+            this.hideDialogs();
+            if (onCancel) onCancel();
+        });
+    }
+    
+    showStyledConfirmDialog(title, message, confirmText, cancelText, onConfirm, onCancel = null) {
+        this.elements.dialogOverlay.classList.remove('hidden');
+        
+        const dialogId = 'dialog-styled-confirm';
+        let dialog = document.getElementById(dialogId);
+        if (!dialog) {
+            dialog = document.createElement('div');
+            dialog.id = dialogId;
+            dialog.className = 'dialog dialog-confirm hidden';
+            dialog.style.width = '380px';
+            dialog.innerHTML = `
+                <div class="dialog-header" id="styled-confirm-title" style="display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color);">
+                    <span id="styled-confirm-icon" style="font-size: 20px;">⚠️</span>
+                    <span id="styled-confirm-header-text">Confirm</span>
+                </div>
+                <div class="dialog-body" id="styled-confirm-message" style="padding: 25px 20px; text-align: center; font-size: 14px; line-height: 1.5;">
+                    Are you sure?
+                </div>
+                <div class="dialog-footer" style="justify-content: center; gap: 12px; padding: 15px 20px;">
+                    <button id="styled-confirm-yes" class="btn-danger" style="padding: 8px 20px; background: var(--error-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Delete</button>
+                    <button id="styled-confirm-no" style="padding: 8px 20px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">Cancel</button>
+                </div>
+            `;
+            this.elements.dialogOverlay.appendChild(dialog);
+        }
+        
+        // Update content
+        const isDelete = confirmText.toLowerCase().includes('delete');
+        const icon = isDelete ? '🗑️' : '⚠️';
+        const btnClass = isDelete ? 'var(--error-color)' : 'var(--accent-color)';
+        
+        document.getElementById('styled-confirm-icon').textContent = icon;
+        document.getElementById('styled-confirm-header-text').textContent = title;
+        document.getElementById('styled-confirm-message').textContent = message;
+        
+        const yesBtn = document.getElementById('styled-confirm-yes');
+        const noBtn = document.getElementById('styled-confirm-no');
+        
+        yesBtn.textContent = confirmText;
+        yesBtn.style.background = btnClass;
+        noBtn.textContent = cancelText;
+        
+        dialog.classList.remove('hidden');
+        
+        // Remove old listeners
+        const newYesBtn = yesBtn.cloneNode(true);
+        const newNoBtn = noBtn.cloneNode(true);
+        yesBtn.parentNode.replaceChild(newYesBtn, yesBtn);
+        noBtn.parentNode.replaceChild(newNoBtn, noBtn);
+        
+        newYesBtn.addEventListener('click', () => {
+            this.hideDialogs();
+            if (onConfirm) onConfirm();
+        });
+        
+        newNoBtn.addEventListener('click', () => {
             this.hideDialogs();
             if (onCancel) onCancel();
         });
@@ -956,7 +1437,7 @@ class AkashicEditor {
             'find': { key: 'f', ctrl: true, shift: false, action: () => this.showFindReplaceDialog(false) },
             'replace': { key: 'h', ctrl: true, shift: false, action: () => this.showFindReplaceDialog(true) },
             'go-to': { key: 'g', ctrl: true, shift: false, action: () => this.showGoToDialog() },
-            'zoom-in': { key: '=', ctrl: true, shift: false, action: () => this.zoomIn() },
+            'zoom-in': { key: '+', ctrl: true, shift: true, action: () => this.zoomIn() },
             'zoom-out': { key: '-', ctrl: true, shift: false, action: () => this.zoomOut() },
             'reset-zoom': { key: '0', ctrl: true, shift: false, action: () => this.resetZoom() },
             'word-wrap': { key: 'z', ctrl: true, shift: false, action: () => this.toggleWordWrap() },
@@ -972,6 +1453,25 @@ class AkashicEditor {
                 e.preventDefault();
                 this.toggleFullscreen();
                 return;
+            }
+            
+            // Handle zoom shortcuts specially (Ctrl++, Ctrl+-, Ctrl+0)
+            if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+                if (e.key === '+' || e.key === '=') {
+                    e.preventDefault();
+                    this.zoomIn();
+                    return;
+                }
+                if (e.key === '-') {
+                    e.preventDefault();
+                    this.zoomOut();
+                    return;
+                }
+                if (e.key === '0') {
+                    e.preventDefault();
+                    this.resetZoom();
+                    return;
+                }
             }
             
             // Check for matching shortcut
@@ -1040,7 +1540,7 @@ class AkashicEditor {
             dialog.innerHTML = `
                 <div class="dialog-header">About Akashic</div>
                 <div class="dialog-body" style="text-align: center; padding: 30px;">
-                    <img src="./src/assets/images/logo.png" alt="Akashic Logo" style="width: 80px; height: 80px; margin-bottom: 20px; border-radius: 8px;">
+                    <img src="./logo.png" alt="Akashic Logo" style="width: 80px; height: 80px; margin-bottom: 20px; border-radius: 8px;">
                     <h2 style="margin-bottom: 10px; color: var(--accent-color);">Akashic Editor</h2>
                     <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 20px;">v0.1.0</p>
                     <p style="font-size: 13px; line-height: 1.6; margin-bottom: 20px;">
@@ -1080,18 +1580,13 @@ class AkashicEditor {
                             <tr>
                                 <th style="text-align: left; padding: 10px 15px; border-bottom: 1px solid var(--border-color);">Action</th>
                                 <th style="text-align: left; padding: 10px 15px; border-bottom: 1px solid var(--border-color);">Shortcut</th>
-                                <th style="text-align: center; padding: 10px 15px; border-bottom: 1px solid var(--border-color);">Custom</th>
                             </tr>
                         </thead>
                         <tbody id="shortcuts-list">
                         </tbody>
                     </table>
-                    <div id="shortcut-conflict" style="display: none; padding: 10px 15px; background: var(--error-color); color: white; font-size: 12px; margin: 10px;">
-                        This shortcut is already in use. Please change the existing shortcut first.
-                    </div>
                 </div>
                 <div class="dialog-footer">
-                    <button id="shortcuts-reset">Reset to Defaults</button>
                     <button id="shortcuts-close">Close</button>
                 </div>
             `;
@@ -1099,11 +1594,6 @@ class AkashicEditor {
             
             document.getElementById('shortcuts-close').addEventListener('click', () => {
                 this.hideDialogs();
-            });
-            
-            document.getElementById('shortcuts-reset').addEventListener('click', () => {
-                this.resetShortcutsToDefaults();
-                this.renderShortcutsList();
             });
         }
         
@@ -1151,149 +1641,9 @@ class AkashicEditor {
                         ${displayShortcut.join('+')}
                     </kbd>
                 </td>
-                <td style="padding: 8px 15px; text-align: center;">
-                    <button class="edit-shortcut" data-name="${name}" style="padding: 2px 8px; font-size: 11px; background: var(--accent-color); border: none; color: white; border-radius: 3px; cursor: pointer;">Edit</button>
-                </td>
             `;
             tbody.appendChild(row);
         }
-        
-        // Add event listeners for edit buttons
-        tbody.querySelectorAll('.edit-shortcut').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const name = e.target.dataset.name;
-                this.editShortcut(name);
-            });
-        });
-    }
-    
-    editShortcut(name) {
-        const shortcut = this.shortcuts[name];
-        const shortcutNames = {
-            'new': 'New File', 'open': 'Open File', 'save': 'Save', 'save-as': 'Save As',
-            'find': 'Find', 'replace': 'Replace', 'go-to': 'Go To Line',
-            'zoom-in': 'Zoom In', 'zoom-out': 'Zoom Out', 'reset-zoom': 'Reset Zoom',
-            'word-wrap': 'Toggle Word Wrap', 'line-numbers': 'Toggle Line Numbers',
-            'minimap': 'Toggle Minimap', 'fullscreen': 'Fullscreen', 'ai-sidebar': 'Toggle AI Sidebar'
-        };
-        
-        // Create edit dialog
-        const editDialog = document.createElement('div');
-        editDialog.id = 'dialog-edit-shortcut';
-        editDialog.className = 'dialog dialog-confirm';
-        editDialog.innerHTML = `
-            <div class="dialog-header">Edit Shortcut</div>
-            <div class="dialog-body" style="text-align: center;">
-                <p style="margin-bottom: 15px;">Press the new key combination for:</p>
-                <p style="font-weight: bold; color: var(--accent-color); margin-bottom: 20px;">${shortcutNames[name]}</p>
-                <div id="new-shortcut-display" style="padding: 15px; background: var(--bg-tertiary); border-radius: 4px; font-family: monospace; font-size: 16px; min-height: 24px;">
-                    Press keys...
-                </div>
-                <p id="shortcut-error" style="color: var(--error-color); font-size: 12px; margin-top: 10px; display: none;"></p>
-            </div>
-            <div class="dialog-footer">
-                <button id="edit-shortcut-save" disabled>Save</button>
-                <button id="edit-shortcut-cancel">Cancel</button>
-            </div>
-        `;
-        this.elements.dialogOverlay.appendChild(editDialog);
-        
-        let newShortcut = null;
-        let conflictError = null;
-        
-        const captureHandler = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            if (e.key === 'Escape') {
-                cleanup();
-                return;
-            }
-            
-            const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-            const ctrl = e.ctrlKey || e.metaKey;
-            const shift = e.shiftKey;
-            
-            // Skip if only modifier keys
-            if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') {
-                return;
-            }
-            
-            newShortcut = { key, ctrl, shift };
-            
-            const display = [];
-            if (ctrl) display.push('Ctrl');
-            if (shift) display.push('Shift');
-            display.push(key.toUpperCase());
-            
-            document.getElementById('new-shortcut-display').textContent = display.join('+');
-            
-            // Check for conflicts
-            conflictError = this.checkShortcutConflict(name, newShortcut);
-            const errorEl = document.getElementById('shortcut-error');
-            if (conflictError) {
-                errorEl.textContent = `Conflict: "${conflictError}" already uses this shortcut`;
-                errorEl.style.display = 'block';
-                document.getElementById('edit-shortcut-save').disabled = true;
-            } else {
-                errorEl.style.display = 'none';
-                document.getElementById('edit-shortcut-save').disabled = false;
-            }
-        };
-        
-        const cleanup = () => {
-            document.removeEventListener('keydown', captureHandler, true);
-            editDialog.remove();
-        };
-        
-        document.addEventListener('keydown', captureHandler, true);
-        
-        document.getElementById('edit-shortcut-cancel').addEventListener('click', cleanup);
-        
-        document.getElementById('edit-shortcut-save').addEventListener('click', () => {
-            if (newShortcut && !conflictError) {
-                this.shortcuts[name].key = newShortcut.key;
-                this.shortcuts[name].ctrl = newShortcut.ctrl;
-                this.shortcuts[name].shift = newShortcut.shift;
-                this.showNotification(`Shortcut updated for ${shortcutNames[name]}`);
-                this.renderShortcutsList();
-            }
-            cleanup();
-        });
-    }
-    
-    checkShortcutConflict(currentName, newShortcut) {
-        for (const [name, shortcut] of Object.entries(this.shortcuts)) {
-            if (name === currentName) continue;
-            
-            if (shortcut.key.toLowerCase() === newShortcut.key.toLowerCase() &&
-                shortcut.ctrl === newShortcut.ctrl &&
-                shortcut.shift === newShortcut.shift) {
-                return name;
-            }
-        }
-        return null;
-    }
-    
-    resetShortcutsToDefaults() {
-        this.shortcuts = {
-            'new': { key: 'n', ctrl: true, shift: false, action: () => this.newFile() },
-            'open': { key: 'o', ctrl: true, shift: false, action: () => this.openFile() },
-            'save': { key: 's', ctrl: true, shift: false, action: () => this.saveTab() },
-            'save-as': { key: 's', ctrl: true, shift: true, action: () => this.saveAs() },
-            'find': { key: 'f', ctrl: true, shift: false, action: () => this.showFindReplaceDialog(false) },
-            'replace': { key: 'h', ctrl: true, shift: false, action: () => this.showFindReplaceDialog(true) },
-            'go-to': { key: 'g', ctrl: true, shift: false, action: () => this.showGoToDialog() },
-            'zoom-in': { key: '=', ctrl: true, shift: false, action: () => this.zoomIn() },
-            'zoom-out': { key: '-', ctrl: true, shift: false, action: () => this.zoomOut() },
-            'reset-zoom': { key: '0', ctrl: true, shift: false, action: () => this.resetZoom() },
-            'word-wrap': { key: 'z', ctrl: true, shift: false, action: () => this.toggleWordWrap() },
-            'line-numbers': { key: 'l', ctrl: true, shift: true, action: () => this.toggleLineNumbers() },
-            'minimap': { key: 'm', ctrl: true, shift: true, action: () => this.toggleMinimap() },
-            'fullscreen': { key: 'F11', ctrl: false, shift: false, action: () => this.toggleFullscreen() },
-            'ai-sidebar': { key: 'a', ctrl: true, shift: true, action: () => this.toggleAISidebar() }
-        };
-        this.showNotification('Shortcuts reset to defaults');
     }
     
     setupWindowCloseHandler() {
@@ -1367,29 +1717,23 @@ class AkashicEditor {
         try {
             const status = await CheckOllamaInstalled();
             this.ollamaStatus = status;
-            
-            const statusIcon = document.getElementById('ollama-status-icon');
-            const statusMessage = document.getElementById('ollama-status-message');
-            const installInstructions = document.getElementById('ollama-install-instructions');
-            const modelSelectionSection = document.getElementById('model-selection-section');
-            
+
+            const statusIndicator = document.getElementById('ai-status-indicator');
+            const statusText = document.getElementById('ai-status-text');
+            const setupPanel = document.getElementById('ai-setup-panel');
+
             if (status.installed) {
-                statusIcon.textContent = '✅';
-                statusMessage.textContent = `Ollama installed: ${status.version}`;
-                statusMessage.style.backgroundColor = 'rgba(78, 201, 176, 0.2)';
-                statusMessage.style.color = 'var(--success-color)';
-                installInstructions.classList.add('hidden');
-                modelSelectionSection.classList.remove('hidden');
-                
+                statusIndicator.className = 'status-dot online';
+                statusText.textContent = `Ollama ${status.version}`;
+                setupPanel.classList.add('hidden');
+
                 // Load models and check server
                 await this.loadInstalledModels();
                 await this.checkServerStatus();
             } else {
-                statusIcon.textContent = '❌';
-                statusMessage.textContent = status.message;
-                statusMessage.style.backgroundColor = 'rgba(244, 135, 113, 0.2)';
-                statusMessage.style.color = 'var(--error-color)';
-                installInstructions.classList.remove('hidden');
+                statusIndicator.className = 'status-dot offline';
+                statusText.textContent = 'Ollama not installed';
+                setupPanel.classList.remove('hidden');
             }
         } catch (err) {
             console.error('Failed to check Ollama:', err);
@@ -1403,18 +1747,12 @@ class AkashicEditor {
             this.installedModels = models;
             
             const select = document.getElementById('ai-model');
-            const noModelsMsg = document.getElementById('no-models-message');
-            const serverControlSection = document.getElementById('server-control-section');
             
             select.innerHTML = '';
             
             if (models.length === 0) {
                 select.innerHTML = '<option value="">No models installed</option>';
-                noModelsMsg.classList.remove('hidden');
             } else {
-                noModelsMsg.classList.add('hidden');
-                serverControlSection.classList.remove('hidden');
-                
                 models.forEach(model => {
                     const option = document.createElement('option');
                     option.value = model.name;
@@ -1441,7 +1779,6 @@ class AkashicEditor {
             await GetInstalledModels();
             this.serverRunning = true;
             this.updateServerStatusUI(true);
-            document.getElementById('chat-section').classList.remove('hidden');
         } catch (err) {
             this.serverRunning = false;
             this.updateServerStatusUI(false);
@@ -1449,22 +1786,26 @@ class AkashicEditor {
     }
     
     updateServerStatusUI(running) {
-        const statusIcon = document.getElementById('server-status-icon');
-        const statusText = document.getElementById('server-status-text');
+        const statusIndicator = document.getElementById('ai-status-indicator');
+        const statusText = document.getElementById('ai-status-text');
         const startBtn = document.getElementById('start-ollama-server');
         
+        if (!statusIndicator || !statusText) return;
+        
         if (running) {
-            statusIcon.textContent = '🟢';
-            statusText.textContent = 'Server is running';
+            statusIndicator.className = 'status-dot online';
+            statusText.textContent = 'Server running';
             statusText.style.color = 'var(--success-color)';
-            startBtn.textContent = '✅ Server Running';
-            startBtn.disabled = true;
+            if (startBtn) {
+                startBtn.classList.add('hidden');
+            }
         } else {
-            statusIcon.textContent = '🔴';
-            statusText.textContent = 'Server is not running';
+            statusIndicator.className = 'status-dot offline';
+            statusText.textContent = 'Server not running';
             statusText.style.color = 'var(--error-color)';
-            startBtn.textContent = '▶️ Start Ollama Server';
-            startBtn.disabled = false;
+            if (startBtn) {
+                startBtn.classList.remove('hidden');
+            }
         }
     }
     
@@ -1475,7 +1816,7 @@ class AkashicEditor {
             this.showNotification('Ollama server started!', 'success');
             this.serverRunning = true;
             this.updateServerStatusUI(true);
-            document.getElementById('chat-section').classList.remove('hidden');
+            document.getElementById('ai-chat-container').classList.remove('hidden');
         } catch (err) {
             console.error('Failed to start server:', err);
             this.showNotification(err.message || 'Failed to start server', 'error');
@@ -1488,23 +1829,81 @@ class AkashicEditor {
             return;
         }
         
-        const prompt = document.getElementById('ai-prompt').value;
+        // Create new chat if none exists
+        if (!this.currentChatId) {
+            await this.createNewChat();
+        }
+        
+        const promptInput = document.getElementById('ai-prompt');
+        const prompt = promptInput.value;
         if (!prompt.trim()) {
             this.showNotification('Please enter a prompt', 'warning');
             return;
         }
         
-        const responseDiv = document.getElementById('ai-response');
-        responseDiv.innerHTML = '<div style="color: var(--text-secondary); font-style: italic;">Generating...</div>';
+        const messagesDiv = document.getElementById('ai-messages');
+        
+        // Remove welcome message if present
+        const welcome = messagesDiv.querySelector('.ai-welcome');
+        if (welcome) welcome.remove();
+        
+        // Add user message
+        const userMsgDiv = document.createElement('div');
+        userMsgDiv.className = 'ai-message user';
+        userMsgDiv.innerHTML = `<div class="ai-message-content">${this.escapeHtml(prompt)}</div>`;
+        messagesDiv.appendChild(userMsgDiv);
+        
+        // Add AI response placeholder
+        const aiMsgDiv = document.createElement('div');
+        aiMsgDiv.className = 'ai-message assistant';
+        aiMsgDiv.innerHTML = '<div class="ai-message-content" style="color: var(--text-secondary); font-style: italic;">Generating...</div>';
+        messagesDiv.appendChild(aiMsgDiv);
+        
+        // Clear input
+        promptInput.value = '';
+        
+        // Scroll to bottom
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
         
         try {
-            const response = await GenerateWithOllama(this.selectedModel, prompt);
-            responseDiv.innerHTML = `<div style="white-space: pre-wrap;">${response}</div>`;
+            // Save user message to database
+            await AddMessage(this.currentChatId, 'user', prompt);
+            
+            // Get context from previous messages
+            const context = await GetChatContext(this.currentChatId, 10);
+            
+            // Generate with context
+            const fullPrompt = context + '\n\nUser: ' + prompt + '\n\nAssistant:';
+            const response = await GenerateWithOllama(this.selectedModel, fullPrompt);
+            
+            // Update AI message
+            aiMsgDiv.innerHTML = `<div class="ai-message-content" style="white-space: pre-wrap;">${this.escapeHtml(response)}</div>`;
             this.lastAIResponse = response;
+            
+            // Save AI response to database
+            await AddMessage(this.currentChatId, 'assistant', response);
+            
+            // Update chat title if it's the first message
+            const chat = this.chats.find(c => c.id === this.currentChatId);
+            if (chat && chat.title === 'New Chat') {
+                await RenameChatFromFirstMessage(this.currentChatId);
+                // Reload chat list to show updated title
+                await this.loadChatHistory();
+                this.updateChatInfo();
+            }
         } catch (err) {
             console.error('Generation failed:', err);
-            responseDiv.innerHTML = `<div style="color: var(--error-color);">Error: ${err.message}</div>`;
+            aiMsgDiv.innerHTML = `<div class="ai-message-content" style="color: var(--error-color);">Error: ${err.message}</div>`;
         }
+        
+        // Scroll to bottom again
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
     
     insertAIResponse() {
@@ -1560,7 +1959,7 @@ class AkashicEditor {
         }
         
         // AI action buttons
-        const generateBtn = document.getElementById('ai-generate');
+        const generateBtn = document.getElementById('ai-send');
         if (generateBtn) {
             generateBtn.addEventListener('click', () => this.generateWithAI());
         }
@@ -1574,6 +1973,56 @@ class AkashicEditor {
         if (replaceBtn) {
             replaceBtn.addEventListener('click', () => this.replaceWithAIResponse());
         }
+        
+        // AI suggestions
+        document.querySelectorAll('.ai-suggestion').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const prompt = btn.dataset.prompt;
+                document.getElementById('ai-prompt').value = prompt;
+                this.updateSendButtonState();
+                this.generateWithAI();
+            });
+        });
+        
+        // Enter key in prompt and input validation
+        const promptInput = document.getElementById('ai-prompt');
+        if (promptInput) {
+            promptInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.generateWithAI();
+                }
+            });
+            
+            // Enable/disable send button based on input
+            promptInput.addEventListener('input', () => {
+                this.updateSendButtonState();
+            });
+        }
+        
+        // Model select change
+        const modelSelect = document.getElementById('ai-model');
+        if (modelSelect) {
+            modelSelect.addEventListener('change', () => {
+                this.updateSendButtonState();
+            });
+        }
+        
+        // Initial state
+        this.updateSendButtonState();
+    }
+    
+    updateSendButtonState() {
+        const sendBtn = document.getElementById('ai-send');
+        const promptInput = document.getElementById('ai-prompt');
+        const modelSelect = document.getElementById('ai-model');
+        
+        if (!sendBtn || !promptInput || !modelSelect) return;
+        
+        const hasText = promptInput.value.trim().length > 0;
+        const hasModel = modelSelect.value && modelSelect.value !== '';
+        
+        sendBtn.disabled = !(hasText && hasModel);
     }
 }
 

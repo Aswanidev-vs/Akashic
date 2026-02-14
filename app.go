@@ -32,16 +32,28 @@ type App struct {
 	FileManager     *FileManager
 	SettingsManager *SettingsManager
 	EventBus        *EventBus
+	ChatDB          *ChatDB
+	activeRequests  map[string]context.CancelFunc
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	app := &App{}
+	app := &App{
+		activeRequests: make(map[string]context.CancelFunc),
+	}
 
 	// Initialize modules
 	app.EventBus = NewEventBus()
 	app.SettingsManager = NewSettingsManager()
 	app.FileManager = NewFileManager(app)
+
+	// Initialize chat database
+	var err error
+	app.ChatDB, err = NewChatDB()
+	if err != nil {
+		fmt.Printf("Failed to initialize chat database: %v\n", err)
+		// Continue without chat history if DB fails
+	}
 
 	return app
 }
@@ -61,6 +73,98 @@ func (a *App) startup(ctx context.Context) {
 
 	// Publish startup event
 	a.EventBus.Publish("app.startup", nil)
+}
+
+// ============================================
+// Chat History API
+// ============================================
+
+// CreateChat creates a new chat session
+func (a *App) CreateChat(title, modelName string) (*Chat, error) {
+	if a.ChatDB == nil {
+		return nil, fmt.Errorf("chat database not initialized")
+	}
+	return a.ChatDB.CreateChat(title, modelName)
+}
+
+// GetChats returns all chat sessions
+func (a *App) GetChats() ([]Chat, error) {
+	if a.ChatDB == nil {
+		return []Chat{}, nil
+	}
+	return a.ChatDB.GetAllChats()
+}
+
+// GetChatMessages returns all messages for a chat
+func (a *App) GetChatMessages(chatID int64) ([]Message, error) {
+	if a.ChatDB == nil {
+		return []Message{}, nil
+	}
+	return a.ChatDB.GetChatMessages(chatID)
+}
+
+// DeleteChat deletes a chat and all its messages
+func (a *App) DeleteChat(chatID int64) error {
+	if a.ChatDB == nil {
+		return fmt.Errorf("chat database not initialized")
+	}
+	return a.ChatDB.DeleteChat(chatID)
+}
+
+// DeleteAllChats deletes all chats
+func (a *App) DeleteAllChats() error {
+	if a.ChatDB == nil {
+		return fmt.Errorf("chat database not initialized")
+	}
+	return a.ChatDB.DeleteAllChats()
+}
+
+// UpdateChatTitle updates a chat's title
+func (a *App) UpdateChatTitle(chatID int64, title string) error {
+	if a.ChatDB == nil {
+		return fmt.Errorf("chat database not initialized")
+	}
+	return a.ChatDB.UpdateChatTitle(chatID, title)
+}
+
+// AddMessage adds a message to a chat
+func (a *App) AddMessage(chatID int64, role, content string) (*Message, error) {
+	if a.ChatDB == nil {
+		return nil, fmt.Errorf("chat database not initialized")
+	}
+	return a.ChatDB.AddMessage(chatID, role, content)
+}
+
+// GetChatContext builds context from recent messages for AI memory
+func (a *App) GetChatContext(chatID int64, maxMessages int) (string, error) {
+	if a.ChatDB == nil {
+		return "", nil
+	}
+	return a.ChatDB.BuildContext(chatID, maxMessages)
+}
+
+// RenameChatFromFirstMessage auto-renames a chat based on first message
+func (a *App) RenameChatFromFirstMessage(chatID int64) error {
+	if a.ChatDB == nil {
+		return fmt.Errorf("chat database not initialized")
+	}
+	return a.ChatDB.RenameChatFromFirstMessage(chatID)
+}
+
+// SearchChats searches chats by title
+func (a *App) SearchChats(query string) ([]Chat, error) {
+	if a.ChatDB == nil {
+		return []Chat{}, nil
+	}
+	return a.ChatDB.SearchChats(query)
+}
+
+// ExportChat exports a chat as formatted text
+func (a *App) ExportChat(chatID int64) (string, error) {
+	if a.ChatDB == nil {
+		return "", fmt.Errorf("chat database not initialized")
+	}
+	return a.ChatDB.ExportChat(chatID)
 }
 
 // GetSettings returns the current application settings
@@ -216,6 +320,12 @@ func (a *App) CheckOllamaInstalled() OllamaStatus {
 	}
 }
 
+// CheckOllamaServerRunning checks if the Ollama server is running via HTTP API
+func (a *App) CheckOllamaServerRunning() bool {
+	_, err := http.Get("http://localhost:11434/api/tags")
+	return err == nil
+}
+
 // GetInstalledModels returns list of installed Ollama models
 func (a *App) GetInstalledModels() []OllamaModel {
 	cmd := exec.Command("ollama", "list")
@@ -300,7 +410,7 @@ type OllamaGenerateResponse struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// GenerateWithOllama sends a prompt to Ollama and returns the response
+// GenerateWithOllama sends a prompt to Ollama and returns the response (non-streaming)
 func (a *App) GenerateWithOllama(model string, prompt string) (string, error) {
 	// First check if server is running
 	_, err := http.Get("http://localhost:11434/api/tags")
@@ -347,6 +457,142 @@ func (a *App) GenerateWithOllama(model string, prompt string) (string, error) {
 	}
 
 	return result.Response, nil
+}
+
+// GenerateWithOllamaStream sends a prompt to Ollama and streams the response via events
+// The frontend listens for "ai.stream.chunk" and "ai.stream.done" events
+func (a *App) GenerateWithOllamaStream(requestID string, model string, prompt string, promptContext string) error {
+	// First check if server is running
+	_, err := http.Get("http://localhost:11434/api/tags")
+	if err != nil {
+		return fmt.Errorf("Ollama server is not running. Please start it first.")
+	}
+
+	// Build full prompt with context if provided
+	fullPrompt := prompt
+	if promptContext != "" {
+		fullPrompt = fmt.Sprintf("Context:\n%s\n\nUser request: %s", promptContext, prompt)
+	}
+
+	// Prepare request with streaming enabled
+	reqBody := OllamaGenerateRequest{
+		Model:  model,
+		Prompt: fullPrompt,
+		Stream: true,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	// Create cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+	a.activeRequests[requestID] = cancel
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 0, // No timeout for streaming
+	}
+
+	// Create request with cancellable context
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost:11434/api/generate", bytes.NewBuffer(jsonData))
+	if err != nil {
+		delete(a.activeRequests, requestID)
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Execute request in goroutine
+	go func() {
+		defer delete(a.activeRequests, requestID)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			if ctx.Err() == context.Canceled {
+				a.EventBus.Publish("ai.stream.done", map[string]string{
+					"requestID": requestID,
+					"reason":    "cancelled",
+				})
+				return
+			}
+			a.EventBus.Publish("ai.stream.error", map[string]string{
+				"requestID": requestID,
+				"error":     fmt.Sprintf("Error: %v", err),
+			})
+			return
+		}
+		defer resp.Body.Close()
+
+		// Read streaming response line by line
+		decoder := json.NewDecoder(resp.Body)
+		for {
+			select {
+			case <-ctx.Done():
+				// Request was cancelled
+				a.EventBus.Publish("ai.stream.done", map[string]string{
+					"requestID": requestID,
+					"reason":    "cancelled",
+				})
+				return
+			default:
+				var chunk OllamaGenerateResponse
+				if err := decoder.Decode(&chunk); err != nil {
+					if err == io.EOF {
+						// Stream completed successfully
+						a.EventBus.Publish("ai.stream.done", map[string]string{
+							"requestID": requestID,
+						})
+						return
+					}
+					if ctx.Err() == context.Canceled {
+						a.EventBus.Publish("ai.stream.done", map[string]string{
+							"requestID": requestID,
+							"reason":    "cancelled",
+						})
+						return
+					}
+					a.EventBus.Publish("ai.stream.error", map[string]string{
+						"requestID": requestID,
+						"error":     fmt.Sprintf("[Error reading response: %v]", err),
+					})
+					return
+				}
+
+				if chunk.Error != "" {
+					a.EventBus.Publish("ai.stream.error", map[string]string{
+						"requestID": requestID,
+						"error":     fmt.Sprintf("[Ollama error: %s]", chunk.Error),
+					})
+					return
+				}
+
+				// Publish chunk
+				a.EventBus.Publish("ai.stream.chunk", map[string]string{
+					"requestID": requestID,
+					"chunk":     chunk.Response,
+				})
+
+				if chunk.Done {
+					// Stream completed
+					a.EventBus.Publish("ai.stream.done", map[string]string{
+						"requestID": requestID,
+					})
+					return
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+// StopGeneration cancels an active generation request
+func (a *App) StopGeneration(requestID string) {
+	if cancel, exists := a.activeRequests[requestID]; exists {
+		cancel()
+		delete(a.activeRequests, requestID)
+	}
 }
 
 // PullModel downloads a model from Ollama
