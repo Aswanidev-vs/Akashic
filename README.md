@@ -1,5 +1,8 @@
 # Akashic
 
+<div align="center">
+<img src="./frontend/src/assets/images/logo12.png" alt="Akashic logo">
+</div>
 A better Notepad with AI that runs on your own machine.
 
 ## Why I Built This
