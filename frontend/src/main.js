@@ -2268,7 +2268,8 @@ class AkashicEditor {
             }
         } catch (err) {
             console.error('Generation failed:', err);
-            aiMsgDiv.innerHTML = `<div class="ai-message-content" style="color: var(--error-color);">Error: ${err.message}</div>`;
+            const safeErrorMessage = this.escapeHtml(err && err.message ? String(err.message) : String(err));
+            aiMsgDiv.innerHTML = `<div class="ai-message-content" style="color: var(--error-color);">Error: ${safeErrorMessage}</div>`;
         }
         
         // Scroll to bottom again
