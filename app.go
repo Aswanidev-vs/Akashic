@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -34,6 +35,8 @@ type App struct {
 	EventBus        *EventBus
 	ChatDB          *ChatDB
 	activeRequests  map[string]context.CancelFunc
+	ollamaProcess   *exec.Cmd
+	ollamaMutex     sync.Mutex
 }
 
 // NewApp creates a new App application struct
@@ -327,7 +330,66 @@ func (a *App) CheckOllamaServerRunning() bool {
 }
 
 // GetInstalledModels returns list of installed Ollama models
+// Tries API first, falls back to CLI command
 func (a *App) GetInstalledModels() []OllamaModel {
+	// First try the HTTP API (works if server is running)
+	if a.CheckOllamaServerRunning() {
+		models, err := a.getModelsFromAPI()
+		if err == nil && len(models) > 0 {
+			return models
+		}
+	}
+
+	// Fallback to CLI command
+	return a.getModelsFromCLI()
+}
+
+// getModelsFromAPI fetches models from Ollama HTTP API
+func (a *App) getModelsFromAPI() ([]OllamaModel, error) {
+	resp, err := http.Get("http://localhost:11434/api/tags")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Models []struct {
+			Name       string    `json:"name"`
+			Size       int64     `json:"size"`
+			ModifiedAt time.Time `json:"modified_at"`
+		} `json:"models"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	var models []OllamaModel
+	for _, m := range result.Models {
+		model := OllamaModel{
+			Name:     m.Name,
+			Size:     formatBytes(m.Size),
+			Modified: m.ModifiedAt.Format("2006-01-02 15:04:05"),
+		}
+		// Try to extract parameters from name (e.g., llama3:8b -> 8B)
+		if idx := strings.Index(m.Name, ":"); idx != -1 {
+			tag := m.Name[idx+1:]
+			if strings.Contains(tag, "b") {
+				model.Parameters = strings.ToUpper(tag)
+			}
+		}
+		models = append(models, model)
+	}
+
+	return models, nil
+}
+
+// getModelsFromCLI fetches models using ollama list command
+func (a *App) getModelsFromCLI() []OllamaModel {
 	cmd := exec.Command("ollama", "list")
 	cmd.SysProcAttr = hideConsoleWindows()
 	output, err := cmd.CombinedOutput()
@@ -366,12 +428,44 @@ func (a *App) GetInstalledModels() []OllamaModel {
 	return models
 }
 
-// StartOllamaServer starts the Ollama server
+// formatBytes converts bytes to human readable format
+func formatBytes(bytes int64) string {
+	const (
+		KB = 1024
+		MB = 1024 * KB
+		GB = 1024 * MB
+	)
+
+	switch {
+	case bytes >= GB:
+		return fmt.Sprintf("%.2f GB", float64(bytes)/GB)
+	case bytes >= MB:
+		return fmt.Sprintf("%.2f MB", float64(bytes)/MB)
+	case bytes >= KB:
+		return fmt.Sprintf("%.2f KB", float64(bytes)/KB)
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
+// StartOllamaServer starts the Ollama server with proper process tracking
 func (a *App) StartOllamaServer() error {
+	a.ollamaMutex.Lock()
+	defer a.ollamaMutex.Unlock()
+
 	// Check if already running by making a request to the API
-	_, err := http.Get("http://localhost:11434/api/tags")
-	if err == nil {
+	if a.CheckOllamaServerRunning() {
 		return fmt.Errorf("Ollama server is already running")
+	}
+
+	// Check if we already have a tracked process
+	if a.ollamaProcess != nil && a.ollamaProcess.Process != nil {
+		// Try to see if it's still running
+		if err := a.ollamaProcess.Process.Signal(syscall.Signal(0)); err == nil {
+			return fmt.Errorf("Ollama server is already running")
+		}
+		// Process is dead, clear it
+		a.ollamaProcess = nil
 	}
 
 	// Start the server
@@ -379,21 +473,93 @@ func (a *App) StartOllamaServer() error {
 	cmd.SysProcAttr = hideConsoleWindows()
 
 	// Start in background
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil {
 		return fmt.Errorf("failed to start Ollama server: %v", err)
 	}
 
-	// Wait a moment for server to start
-	time.Sleep(2 * time.Second)
+	// Store process reference for later cleanup
+	a.ollamaProcess = cmd
 
-	// Verify it's running
-	_, err = http.Get("http://localhost:11434/api/tags")
-	if err != nil {
-		return fmt.Errorf("Ollama server failed to start properly")
+	// Wait for server to be ready with polling (max 30 seconds)
+	client := &http.Client{Timeout: 2 * time.Second}
+	startTime := time.Now()
+	maxWait := 30 * time.Second
+	checkInterval := 500 * time.Millisecond
+
+	for time.Since(startTime) < maxWait {
+		resp, err := client.Get("http://localhost:11434/api/tags")
+		if err == nil {
+			resp.Body.Close()
+			return nil // Server is ready
+		}
+		time.Sleep(checkInterval)
 	}
 
+	// Server didn't start in time, kill the process
+	if a.ollamaProcess != nil && a.ollamaProcess.Process != nil {
+		a.ollamaProcess.Process.Kill()
+		a.ollamaProcess = nil
+	}
+
+	return fmt.Errorf("Ollama server failed to start within %v", maxWait)
+}
+
+// StopOllamaServer stops the tracked Ollama server process
+func (a *App) StopOllamaServer() error {
+	a.ollamaMutex.Lock()
+	defer a.ollamaMutex.Unlock()
+
+	if a.ollamaProcess == nil || a.ollamaProcess.Process == nil {
+		return nil // Nothing to stop
+	}
+
+	// Try graceful shutdown first
+	if err := a.ollamaProcess.Process.Signal(syscall.SIGTERM); err != nil {
+		// If SIGTERM fails, force kill
+		if err := a.ollamaProcess.Process.Kill(); err != nil {
+			return fmt.Errorf("failed to stop Ollama server: %v", err)
+		}
+	}
+
+	// Wait for process to exit (with timeout)
+	done := make(chan error, 1)
+	go func() {
+		done <- a.ollamaProcess.Wait()
+	}()
+
+	select {
+	case <-done:
+		// Process exited
+	case <-time.After(5 * time.Second):
+		// Timeout, force kill
+		a.ollamaProcess.Process.Kill()
+	}
+
+	a.ollamaProcess = nil
 	return nil
+}
+
+// Shutdown performs cleanup when the app is closing
+func (a *App) Shutdown(ctx context.Context) {
+	// Stop any active AI generation requests
+	for requestID, cancel := range a.activeRequests {
+		cancel()
+		delete(a.activeRequests, requestID)
+	}
+
+	// Stop Ollama server if we started it
+	a.StopOllamaServer()
+
+	// Close chat database
+	if a.ChatDB != nil {
+		a.ChatDB.Close()
+	}
+
+	// Publish shutdown event
+	if a.EventBus != nil {
+		a.EventBus.Publish("app.shutdown", nil)
+	}
 }
 
 // OllamaGenerateRequest represents a request to generate text

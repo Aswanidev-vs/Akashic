@@ -48,6 +48,12 @@ class AkashicEditor {
         this.chats = [];
         this.isLoadingChat = false;
         
+        // Editor view state
+        this.showLineNumbers = false;
+        this.showMinimap = false;
+        this.lineNumbersEl = null;
+        this.minimapEl = null;
+        
         // Wait for DOM
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.init());
@@ -575,6 +581,10 @@ class AkashicEditor {
     createTextareaEditor(tab) {
         console.log('Creating textarea editor for:', tab.id);
         
+        // Create wrapper for editor components
+        const wrapper = document.createElement('div');
+        wrapper.className = 'editor-wrapper';
+        
         const textarea = document.createElement('textarea');
         textarea.className = 'editor-textarea';
         textarea.value = tab.content;
@@ -587,14 +597,23 @@ class AkashicEditor {
         // Event handlers
         textarea.addEventListener('input', () => {
             this.onEditorChange(tab);
+            if (this.showLineNumbers) this.updateLineNumbers(tab);
+            if (this.showMinimap) this.updateMinimap(tab);
         });
         
         textarea.addEventListener('click', () => {
             this.updateCursorPosition(tab);
+            if (this.showLineNumbers) this.updateLineNumbers(tab);
         });
         
         textarea.addEventListener('keyup', () => {
             this.updateCursorPosition(tab);
+            if (this.showLineNumbers) this.updateLineNumbers(tab);
+        });
+        
+        textarea.addEventListener('scroll', () => {
+            if (this.showLineNumbers) this.updateLineNumbers(tab);
+            if (this.showMinimap) this.updateMinimap(tab);
         });
         
         textarea.addEventListener('keydown', (e) => {
@@ -609,8 +628,15 @@ class AkashicEditor {
             }
         });
         
-        this.elements.editorContainer.appendChild(textarea);
+        wrapper.appendChild(textarea);
+        this.elements.editorContainer.appendChild(wrapper);
         tab.textarea = textarea;
+        tab.wrapper = wrapper;
+        
+        // Apply current view settings
+        if (this.showLineNumbers || this.showMinimap) {
+            this.updateEditorView(tab);
+        }
         
         // Focus the textarea
         setTimeout(() => {
@@ -1018,11 +1044,134 @@ class AkashicEditor {
     }
     
     toggleLineNumbers() {
-        this.showNotification('Line numbers feature coming soon');
+        this.showLineNumbers = !this.showLineNumbers;
+        const tab = this.getActiveTab();
+        if (tab) {
+            this.updateEditorView(tab);
+        }
+        this.showNotification(`Line numbers ${this.showLineNumbers ? 'enabled' : 'disabled'}`);
     }
     
     toggleMinimap() {
-        this.showNotification('Minimap feature coming soon');
+        this.showMinimap = !this.showMinimap;
+        const tab = this.getActiveTab();
+        if (tab) {
+            this.updateEditorView(tab);
+        }
+        this.showNotification(`Minimap ${this.showMinimap ? 'enabled' : 'disabled'}`);
+    }
+    
+    updateEditorView(tab) {
+        if (!tab || !tab.textarea) return;
+        
+        // Get or create wrapper
+        let wrapper = tab.textarea.parentElement;
+        if (!wrapper || !wrapper.classList.contains('editor-wrapper')) {
+            // Create wrapper structure
+            wrapper = document.createElement('div');
+            wrapper.className = 'editor-wrapper';
+            tab.textarea.parentNode.insertBefore(wrapper, tab.textarea);
+            wrapper.appendChild(tab.textarea);
+        }
+        
+        // Handle line numbers
+        if (this.showLineNumbers) {
+            if (!this.lineNumbersEl || this.lineNumbersEl.parentNode !== wrapper) {
+                this.lineNumbersEl = document.createElement('div');
+                this.lineNumbersEl.className = 'line-numbers';
+                wrapper.insertBefore(this.lineNumbersEl, tab.textarea);
+            }
+            this.updateLineNumbers(tab);
+        } else if (this.lineNumbersEl && this.lineNumbersEl.parentNode === wrapper) {
+            this.lineNumbersEl.remove();
+            this.lineNumbersEl = null;
+        }
+        
+        // Handle minimap
+        if (this.showMinimap) {
+            if (!this.minimapEl || this.minimapEl.parentNode !== wrapper) {
+                this.minimapEl = document.createElement('div');
+                this.minimapEl.className = 'minimap-container';
+                const minimapContent = document.createElement('div');
+                minimapContent.className = 'minimap-content';
+                this.minimapEl.appendChild(minimapContent);
+                wrapper.appendChild(this.minimapEl);
+            }
+            this.updateMinimap(tab);
+        } else if (this.minimapEl && this.minimapEl.parentNode === wrapper) {
+            this.minimapEl.remove();
+            this.minimapEl = null;
+        }
+        
+        // Update on scroll and input
+        tab.textarea.removeEventListener('scroll', tab._scrollHandler);
+        tab.textarea.removeEventListener('input', tab._inputHandler);
+        
+        tab._scrollHandler = () => {
+            if (this.showLineNumbers) this.updateLineNumbers(tab);
+            if (this.showMinimap) this.updateMinimap(tab);
+        };
+        tab._inputHandler = () => {
+            if (this.showLineNumbers) this.updateLineNumbers(tab);
+            if (this.showMinimap) this.updateMinimap(tab);
+        };
+        
+        tab.textarea.addEventListener('scroll', tab._scrollHandler);
+        tab.textarea.addEventListener('input', tab._inputHandler);
+    }
+    
+    updateLineNumbers(tab) {
+        if (!this.lineNumbersEl || !tab.textarea) return;
+        
+        const lines = tab.textarea.value.split('\n');
+        const scrollTop = tab.textarea.scrollTop;
+        const lineHeight = 21; // 14px * 1.5 line-height
+        const startLine = Math.floor(scrollTop / lineHeight);
+        const visibleLines = Math.ceil(tab.textarea.clientHeight / lineHeight);
+        
+        let html = '';
+        const currentLine = this.getCurrentLineNumber(tab);
+        
+        for (let i = startLine; i < Math.min(startLine + visibleLines + 1, lines.length); i++) {
+            const isActive = (i + 1) === currentLine;
+            html += `<div class="line-number${isActive ? ' active' : ''}">${i + 1}</div>`;
+        }
+        
+        this.lineNumbersEl.innerHTML = html;
+        this.lineNumbersEl.style.paddingTop = '10px';
+    }
+    
+    getCurrentLineNumber(tab) {
+        if (!tab.textarea) return 1;
+        const text = tab.textarea.value.substring(0, tab.textarea.selectionStart);
+        return text.split('\n').length;
+    }
+    
+    updateMinimap(tab) {
+        if (!this.minimapEl || !tab.textarea) return;
+        
+        const minimapContent = this.minimapEl.querySelector('.minimap-content');
+        if (!minimapContent) return;
+        
+        // Show condensed version of content
+        const content = tab.textarea.value;
+        const maxChars = 5000;
+        const displayContent = content.length > maxChars ? content.substring(0, maxChars) + '...' : content;
+        minimapContent.textContent = displayContent;
+        
+        // Update viewport indicator
+        const scrollPercent = tab.textarea.scrollTop / (tab.textarea.scrollHeight - tab.textarea.clientHeight || 1);
+        const viewportHeight = (tab.textarea.clientHeight / tab.textarea.scrollHeight) * 100;
+        
+        let viewport = this.minimapEl.querySelector('.minimap-viewport');
+        if (!viewport) {
+            viewport = document.createElement('div');
+            viewport.className = 'minimap-viewport';
+            this.minimapEl.appendChild(viewport);
+        }
+        
+        viewport.style.top = `${scrollPercent * (100 - viewportHeight)}%`;
+        viewport.style.height = `${Math.max(viewportHeight, 10)}%`;
     }
     
     // ============================================
@@ -1031,15 +1180,128 @@ class AkashicEditor {
     
     showFindReplaceDialog(showReplace = false) {
         this.elements.dialogOverlay.classList.remove('hidden');
-        document.getElementById('dialog-find-replace').classList.remove('hidden');
-        document.getElementById('find-replace-input').focus();
         
-        const replaceSection = document.getElementById('replace-section');
-        if (replaceSection) {
-            replaceSection.style.display = showReplace ? 'block' : 'none';
+        let dialog = document.getElementById('dialog-find-replace');
+        if (!dialog) {
+            dialog = document.createElement('div');
+            dialog.id = 'dialog-find-replace';
+            dialog.className = 'dialog hidden';
+            dialog.innerHTML = `
+                <div class="dialog-header">
+                    <span>${showReplace ? 'Find and Replace' : 'Find'}</span>
+                    <button id="find-close" style="background: none; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer;">×</button>
+                </div>
+                <div class="dialog-body">
+                    <div class="find-replace-row">
+                        <label>Find:</label>
+                        <input type="text" id="find-replace-input" placeholder="Search text...">
+                    </div>
+                    <div class="find-replace-row" id="replace-row" style="display: none;">
+                        <label>Replace:</label>
+                        <input type="text" id="replace-input" placeholder="Replace with...">
+                    </div>
+                    <div class="find-replace-options">
+                        <label><input type="checkbox" id="find-case-sensitive"> Case sensitive</label>
+                        <label><input type="checkbox" id="find-regex"> Regex</label>
+                        <label><input type="checkbox" id="find-whole-word"> Whole word</label>
+                    </div>
+                    <div class="find-replace-stats" id="find-stats"></div>
+                    <div class="find-replace-buttons">
+                        <button id="find-prev-btn" class="primary">Previous</button>
+                        <button id="find-next-btn" class="primary">Next</button>
+                        <button id="replace-one-btn" style="display: none;">Replace</button>
+                        <button id="replace-all-btn" style="display: none;">Replace All</button>
+                    </div>
+                </div>
+            `;
+            this.elements.dialogOverlay.appendChild(dialog);
+            
+            // Setup event listeners
+            document.getElementById('find-close').addEventListener('click', () => this.hideDialogs());
+            document.getElementById('find-next-btn').addEventListener('click', () => this.findNext());
+            document.getElementById('find-prev-btn').addEventListener('click', () => this.findPrevious());
+            document.getElementById('replace-one-btn').addEventListener('click', () => this.replaceOne());
+            document.getElementById('replace-all-btn').addEventListener('click', () => this.replaceAll());
+            
+            // Enter key in find input
+            document.getElementById('find-replace-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                        this.findPrevious();
+                    } else {
+                        this.findNext();
+                    }
+                } else if (e.key === 'Escape') {
+                    this.hideDialogs();
+                }
+            });
+            
+            // Update stats on input
+            document.getElementById('find-replace-input').addEventListener('input', () => this.updateFindStats());
         }
         
+        // Show/hide replace row
+        const replaceRow = document.getElementById('replace-row');
+        const replaceOneBtn = document.getElementById('replace-one-btn');
+        const replaceAllBtn = document.getElementById('replace-all-btn');
+        
+        if (replaceRow) replaceRow.style.display = showReplace ? 'flex' : 'none';
+        if (replaceOneBtn) replaceOneBtn.style.display = showReplace ? 'block' : 'none';
+        if (replaceAllBtn) replaceAllBtn.style.display = showReplace ? 'block' : 'none';
+        
+        // Update header
+        const header = dialog.querySelector('.dialog-header span');
+        if (header) header.textContent = showReplace ? 'Find and Replace' : 'Find';
+        
+        dialog.classList.remove('hidden');
+        document.getElementById('find-replace-input').focus();
+        document.getElementById('find-replace-input').select();
+        
         this.findReplaceMode = showReplace ? 'replace' : 'find';
+        this.updateFindStats();
+    }
+    
+    updateFindStats() {
+        const statsEl = document.getElementById('find-stats');
+        if (!statsEl) return;
+        
+        const tab = this.getActiveTab();
+        if (!tab || !tab.textarea) {
+            statsEl.textContent = '';
+            return;
+        }
+        
+        const searchTerm = document.getElementById('find-replace-input').value;
+        if (!searchTerm) {
+            statsEl.textContent = '';
+            return;
+        }
+        
+        const useRegex = document.getElementById('find-regex')?.checked;
+        const caseSensitive = document.getElementById('find-case-sensitive')?.checked;
+        const wholeWord = document.getElementById('find-whole-word')?.checked;
+        
+        let regex;
+        try {
+            let pattern = searchTerm;
+            if (useRegex) {
+                pattern = searchTerm;
+            } else {
+                pattern = this.escapeRegExp(searchTerm);
+            }
+            if (wholeWord) {
+                pattern = '\\b' + pattern + '\\b';
+            }
+            const flags = caseSensitive ? 'g' : 'gi';
+            regex = new RegExp(pattern, flags);
+        } catch (e) {
+            statsEl.textContent = 'Invalid regex pattern';
+            return;
+        }
+        
+        const matches = (tab.textarea.value.match(regex) || []).length;
+        statsEl.textContent = matches > 0 ? `${matches} match${matches !== 1 ? 'es' : ''} found` : 'No matches found';
     }
     
     findNext() {
@@ -1049,22 +1311,46 @@ class AkashicEditor {
         const searchTerm = document.getElementById('find-replace-input').value;
         if (!searchTerm) return;
         
+        const useRegex = document.getElementById('find-regex')?.checked;
+        const caseSensitive = document.getElementById('find-case-sensitive')?.checked;
+        const wholeWord = document.getElementById('find-whole-word')?.checked;
+        
+        let pattern = searchTerm;
+        if (!useRegex) {
+            pattern = this.escapeRegExp(searchTerm);
+        }
+        if (wholeWord) {
+            pattern = '\\b' + pattern + '\\b';
+        }
+        
+        const flags = caseSensitive ? 'g' : 'gi';
+        let regex;
+        try {
+            regex = new RegExp(pattern, flags);
+        } catch (e) {
+            this.showNotification('Invalid search pattern', 'error');
+            return;
+        }
+        
         const text = tab.textarea.value;
         const startPos = tab.textarea.selectionEnd;
         
-        const index = text.indexOf(searchTerm, startPos);
-        if (index !== -1) {
-            tab.textarea.focus();
-            tab.textarea.setSelectionRange(index, index + searchTerm.length);
-            this.updateCursorPosition(tab);
-        } else {
+        // Find all matches and get the next one after current position
+        let match;
+        regex.lastIndex = startPos;
+        match = regex.exec(text);
+        
+        if (!match) {
             // Wrap around
-            const wrapIndex = text.indexOf(searchTerm, 0);
-            if (wrapIndex !== -1 && wrapIndex < startPos) {
-                tab.textarea.focus();
-                tab.textarea.setSelectionRange(wrapIndex, wrapIndex + searchTerm.length);
-                this.updateCursorPosition(tab);
-            }
+            regex.lastIndex = 0;
+            match = regex.exec(text);
+        }
+        
+        if (match) {
+            tab.textarea.focus();
+            tab.textarea.setSelectionRange(match.index, match.index + match[0].length);
+            this.updateCursorPosition(tab);
+            this.updateFindStats();
         }
     }
     
@@ -1075,22 +1361,52 @@ class AkashicEditor {
         const searchTerm = document.getElementById('find-replace-input').value;
         if (!searchTerm) return;
         
-        const text = tab.textarea.value;
-        const startPos = tab.textarea.selectionStart - 1;
+        const useRegex = document.getElementById('find-regex')?.checked;
+        const caseSensitive = document.getElementById('find-case-sensitive')?.checked;
+        const wholeWord = document.getElementById('find-whole-word')?.checked;
         
-        const index = text.lastIndexOf(searchTerm, startPos);
-        if (index !== -1) {
-            tab.textarea.focus();
-            tab.textarea.setSelectionRange(index, index + searchTerm.length);
-            this.updateCursorPosition(tab);
-        } else {
-            // Wrap around to end
-            const wrapIndex = text.lastIndexOf(searchTerm);
-            if (wrapIndex !== -1 && wrapIndex > startPos) {
-                tab.textarea.focus();
-                tab.textarea.setSelectionRange(wrapIndex, wrapIndex + searchTerm.length);
-                this.updateCursorPosition(tab);
+        let pattern = searchTerm;
+        if (!useRegex) {
+            pattern = this.escapeRegExp(searchTerm);
+        }
+        if (wholeWord) {
+            pattern = '\\b' + pattern + '\\b';
+        }
+        
+        const flags = caseSensitive ? 'g' : 'gi';
+        let regex;
+        try {
+            regex = new RegExp(pattern, flags);
+        } catch (e) {
+            this.showNotification('Invalid search pattern', 'error');
+            return;
+        }
+        
+        const text = tab.textarea.value;
+        const startPos = tab.textarea.selectionStart;
+        
+        // Find all matches and get the one before current position
+        let lastMatch = null;
+        let match;
+        regex.lastIndex = 0;
+        
+        while ((match = regex.exec(text)) !== null) {
+            if (match.index >= startPos) break;
+            lastMatch = match;
+        }
+        
+        if (!lastMatch) {
+            // Wrap around to last match
+            while ((match = regex.exec(text)) !== null) {
+                lastMatch = match;
             }
+        }
+        
+        if (lastMatch) {
+            tab.textarea.focus();
+            tab.textarea.setSelectionRange(lastMatch.index, lastMatch.index + lastMatch[0].length);
+            this.updateCursorPosition(tab);
+            this.updateFindStats();
         }
     }
     
@@ -1103,17 +1419,42 @@ class AkashicEditor {
         
         if (!searchTerm) return;
         
+        const useRegex = document.getElementById('find-regex')?.checked;
+        const caseSensitive = document.getElementById('find-case-sensitive')?.checked;
+        const wholeWord = document.getElementById('find-whole-word')?.checked;
+        
+        let pattern = searchTerm;
+        if (!useRegex) {
+            pattern = this.escapeRegExp(searchTerm);
+        }
+        if (wholeWord) {
+            pattern = '\\b' + pattern + '\\b';
+        }
+        
+        const flags = caseSensitive ? 'g' : 'gi';
+        let regex;
+        try {
+            regex = new RegExp(pattern, flags);
+        } catch (e) {
+            this.showNotification('Invalid search pattern', 'error');
+            return;
+        }
+        
         const text = tab.textarea.value;
         const startPos = tab.textarea.selectionStart;
         
         // Check if current selection matches
         const currentSelection = text.substring(tab.textarea.selectionStart, tab.textarea.selectionEnd);
-        if (currentSelection === searchTerm) {
+        const match = regex.test(currentSelection);
+        regex.lastIndex = 0; // Reset regex
+        
+        if (match) {
             // Replace current selection
             const newText = text.substring(0, tab.textarea.selectionStart) + replaceTerm + text.substring(tab.textarea.selectionEnd);
             tab.textarea.value = newText;
             tab.textarea.setSelectionRange(startPos, startPos + replaceTerm.length);
             this.onEditorChange(tab);
+            this.updateFindStats();
         } else {
             // Find next and select
             this.findNext();
@@ -1129,14 +1470,36 @@ class AkashicEditor {
         
         if (!searchTerm) return;
         
+        const useRegex = document.getElementById('find-regex')?.checked;
+        const caseSensitive = document.getElementById('find-case-sensitive')?.checked;
+        const wholeWord = document.getElementById('find-whole-word')?.checked;
+        
+        let pattern = searchTerm;
+        if (!useRegex) {
+            pattern = this.escapeRegExp(searchTerm);
+        }
+        if (wholeWord) {
+            pattern = '\\b' + pattern + '\\b';
+        }
+        
+        const flags = caseSensitive ? 'g' : 'gi';
+        let regex;
+        try {
+            regex = new RegExp(pattern, flags);
+        } catch (e) {
+            this.showNotification('Invalid search pattern', 'error');
+            return;
+        }
+        
         const text = tab.textarea.value;
-        const regex = new RegExp(this.escapeRegExp(searchTerm), 'g');
+        const matches = (text.match(regex) || []).length;
         const newText = text.replace(regex, replaceTerm);
         
         if (text !== newText) {
             tab.textarea.value = newText;
             this.onEditorChange(tab);
-            this.showNotification(`Replaced ${(text.match(regex) || []).length} occurrence(s)`, 'success');
+            this.showNotification(`Replaced ${matches} occurrence(s)`, 'success');
+            this.updateFindStats();
         }
     }
     
@@ -1448,15 +1811,24 @@ class AkashicEditor {
         };
         
         document.addEventListener('keydown', (e) => {
-            // Handle F11 separately
+            // Handle F11 for fullscreen
             if (e.key === 'F11') {
                 e.preventDefault();
+                e.stopPropagation();
                 this.toggleFullscreen();
                 return;
             }
             
+            // Handle Ctrl+Shift+A for AI Sidebar (prevent browser select all)
+            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleAISidebar();
+                return;
+            }
+            
             // Handle zoom shortcuts specially (Ctrl++, Ctrl+-, Ctrl+0)
-            if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+            if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
                 if (e.key === '+' || e.key === '=') {
                     e.preventDefault();
                     this.zoomIn();
@@ -1476,6 +1848,9 @@ class AkashicEditor {
             
             // Check for matching shortcut
             for (const [name, shortcut] of Object.entries(this.shortcuts)) {
+                // Skip F11 and Ctrl+Shift+A as they're handled above
+                if (name === 'fullscreen' || name === 'ai-sidebar') continue;
+                
                 const keyMatch = e.key.toLowerCase() === shortcut.key.toLowerCase();
                 const ctrlMatch = e.ctrlKey === shortcut.ctrl || e.metaKey === shortcut.ctrl;
                 const shiftMatch = e.shiftKey === shortcut.shift;
@@ -1483,7 +1858,7 @@ class AkashicEditor {
                 if (keyMatch && ctrlMatch && shiftMatch) {
                     // Don't trigger shortcuts in inputs except for file operations
                     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-                        if (name !== 'save' && name !== 'save-as' && name !== 'open' && name !== 'new') {
+                        if (name !== 'save' && name !== 'save-as' && name !== 'open' && name !== 'new' && name !== 'find' && name !== 'replace') {
                             continue;
                         }
                     }

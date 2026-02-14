@@ -118,6 +118,10 @@ export function StopGeneration(arg1) {
   return window['go']['main']['App']['StopGeneration'](arg1);
 }
 
+export function StopOllamaServer() {
+  return window['go']['main']['App']['StopOllamaServer']();
+}
+
 export function UpdateChatTitle(arg1, arg2) {
   return window['go']['main']['App']['UpdateChatTitle'](arg1, arg2);
 }

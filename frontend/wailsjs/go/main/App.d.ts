@@ -60,6 +60,8 @@ export function StartOllamaServer():Promise<void>;
 
 export function StopGeneration(arg1:string):Promise<void>;
 
+export function StopOllamaServer():Promise<void>;
+
 export function UpdateChatTitle(arg1:number,arg2:string):Promise<void>;
 
 export function UpdateSettings(arg1:main.Settings):Promise<void>;
