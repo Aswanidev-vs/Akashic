@@ -1,3 +1,7 @@
 build/bin
 node_modules
 TODO.md
+
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md

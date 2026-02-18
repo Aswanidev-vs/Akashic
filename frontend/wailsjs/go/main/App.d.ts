@@ -16,6 +16,8 @@ export function DeleteAllChats():Promise<void>;
 
 export function DeleteChat(arg1:number):Promise<void>;
 
+export function ExportAsPDF(arg1:string,arg2:string):Promise<void>;
+
 export function ExportChat(arg1:number):Promise<string>;
 
 export function GenerateWithOllama(arg1:string,arg2:string):Promise<string>;

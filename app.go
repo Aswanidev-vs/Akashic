@@ -13,6 +13,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"Akashic/pdfexport"
+
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // hideConsoleWindows returns the correct SysProcAttr for the current OS
@@ -769,5 +773,31 @@ func (a *App) PullModel(modelName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to pull model: %v\nOutput: %s", err, string(output))
 	}
+	return nil
+}
+
+// ExportAsPDF exports content as a professionally formatted PDF using the pdfexport package
+func (a *App) ExportAsPDF(content string, defaultName string) error {
+	// Show save dialog for PDF
+	filePath, err := wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
+		Title:           "Export as PDF",
+		DefaultFilename: defaultName + ".pdf",
+		Filters: []wailsRuntime.FileFilter{
+			{DisplayName: "PDF Files (*.pdf)", Pattern: "*.pdf"},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to show save dialog: %w", err)
+	}
+	if filePath == "" {
+		return nil // User cancelled
+	}
+
+	// Use the pdfexport package to generate the PDF
+	exporter := pdfexport.NewExporter()
+	if err := exporter.Export(content, filePath); err != nil {
+		return fmt.Errorf("failed to export PDF: %w", err)
+	}
+
 	return nil
 }
