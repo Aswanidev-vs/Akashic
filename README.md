@@ -30,11 +30,13 @@ I chose Ollama instead of OpenAI or Claude primarily because local LLMs offer:
 **Core Editing**
 - Multiple tabs with unsaved change indicators
 - Standard file operations (New, Open, Save, Save As)
+- **Export as PDF** - Direct PDF export with save dialog (Ctrl+Shift+E)
 - Find and Replace with regex support
 - Go to Line (Ctrl+G)
-- Word wrap toggle
+- Word wrap toggle (responsive - text wraps based on window width)
 - Zoom in/out/reset (Ctrl++, Ctrl+-, Ctrl+0)
 - Fullscreen mode (F11) - not implemented yet
+
 
 **AI Integration**
 - Sidebar with Ollama integration
@@ -53,7 +55,7 @@ I chose Ollama instead of OpenAI or Claude primarily because local LLMs offer:
 
 **Performance**
 - Opens in under a second
-- Uses 50-80MB RAM at idle
+- Uses less than 60 MB RAM at idle
 - Native app feel without Electron bloat
 
 ## The Stack

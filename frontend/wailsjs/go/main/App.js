@@ -30,6 +30,10 @@ export function DeleteChat(arg1) {
   return window['go']['main']['App']['DeleteChat'](arg1);
 }
 
+export function ExportAsPDF(arg1, arg2) {
+  return window['go']['main']['App']['ExportAsPDF'](arg1, arg2);
+}
+
 export function ExportChat(arg1) {
   return window['go']['main']['App']['ExportChat'](arg1);
 }

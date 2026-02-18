@@ -3,6 +3,7 @@ module Akashic
 go 1.24.0
 
 require (
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/mattn/go-sqlite3 v1.14.34
 	github.com/wailsapp/wails/v2 v2.11.0
 )

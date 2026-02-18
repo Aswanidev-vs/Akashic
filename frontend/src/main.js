@@ -25,8 +25,10 @@ import {
     GetChatContext,
     RenameChatFromFirstMessage,
     SearchChats,
-    ExportChat
+    ExportChat,
+    ExportAsPDF
 } from '../wailsjs/go/main/App.js';
+
 
 console.log('Akashic Editor Starting...');
 
@@ -53,6 +55,8 @@ class AkashicEditor {
         this.showMinimap = false;
         this.lineNumbersEl = null;
         this.minimapEl = null;
+        this.wordWrap = true; // Enable word wrap by default for responsive text
+
         
         // Wait for DOM
         if (document.readyState === 'loading') {
@@ -589,7 +593,8 @@ class AkashicEditor {
         textarea.className = 'editor-textarea';
         textarea.value = tab.content;
         textarea.spellcheck = false;
-        textarea.wrap = 'off';
+        textarea.wrap = this.wordWrap ? 'soft' : 'off';
+
         
         // Apply current zoom
         textarea.style.fontSize = `${this.zoomLevel}%`;
@@ -1035,13 +1040,18 @@ class AkashicEditor {
     }
     
     toggleWordWrap() {
-        const tab = this.getActiveTab();
-        if (!tab || !tab.textarea) return;
+        this.wordWrap = !this.wordWrap;
         
-        const currentWrap = tab.textarea.wrap;
-        tab.textarea.wrap = currentWrap === 'off' ? 'soft' : 'off';
-        this.showNotification(`Word wrap ${tab.textarea.wrap === 'off' ? 'disabled' : 'enabled'}`);
+        // Apply to all tabs
+        this.tabs.forEach(tab => {
+            if (tab.textarea) {
+                tab.textarea.wrap = this.wordWrap ? 'soft' : 'off';
+            }
+        });
+        
+        this.showNotification(`Word wrap ${this.wordWrap ? 'enabled' : 'disabled'}`);
     }
+
     
     toggleLineNumbers() {
         this.showLineNumbers = !this.showLineNumbers;
@@ -1738,6 +1748,13 @@ class AkashicEditor {
             this.elements.newTabBtn.addEventListener('click', () => this.newFile());
         }
         
+        // Export PDF button
+        const exportPdfBtn = document.getElementById('export-pdf-btn');
+        if (exportPdfBtn) {
+            exportPdfBtn.addEventListener('click', () => this.exportAsPDF());
+        }
+
+        
         const closeAiBtn = document.getElementById('close-ai-sidebar');
         if (closeAiBtn) {
             closeAiBtn.addEventListener('click', () => {
@@ -1797,7 +1814,9 @@ class AkashicEditor {
             'open': { key: 'o', ctrl: true, shift: false, action: () => this.openFile() },
             'save': { key: 's', ctrl: true, shift: false, action: () => this.saveTab() },
             'save-as': { key: 's', ctrl: true, shift: true, action: () => this.saveAs() },
+            'export-pdf': { key: 'e', ctrl: true, shift: true, action: () => this.exportAsPDF() },
             'find': { key: 'f', ctrl: true, shift: false, action: () => this.showFindReplaceDialog(false) },
+
             'replace': { key: 'h', ctrl: true, shift: false, action: () => this.showFindReplaceDialog(true) },
             'go-to': { key: 'g', ctrl: true, shift: false, action: () => this.showGoToDialog() },
             'zoom-in': { key: '+', ctrl: true, shift: true, action: () => this.zoomIn() },
@@ -1917,7 +1936,7 @@ class AkashicEditor {
                 <div class="dialog-body" style="text-align: center; padding: 30px;">
                     <img src="./logo.png" alt="Akashic Logo" style="width: 80px; height: 80px; margin-bottom: 20px; border-radius: 8px;">
                     <h2 style="margin-bottom: 10px; color: var(--accent-color);">Akashic Editor</h2>
-                    <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 20px;">v0.1.0</p>
+                    <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 20px;">v0.2.0</p>
                     <p style="font-size: 13px; line-height: 1.6; margin-bottom: 20px;">
                         Akashic is an AI-enhanced text editor built with Wails and modern web technologies.
                         Designed for developers who want a lightweight yet powerful editing experience.
@@ -1987,7 +2006,9 @@ class AkashicEditor {
             'open': 'Open File',
             'save': 'Save',
             'save-as': 'Save As',
+            'export-pdf': 'Export as PDF',
             'find': 'Find',
+
             'replace': 'Replace',
             'go-to': 'Go To Line',
             'zoom-in': 'Zoom In',
@@ -2083,6 +2104,35 @@ class AkashicEditor {
             window.close();
         }
     }
+
+    // ============================================
+    // PDF Export
+    // ============================================
+    
+    async exportAsPDF() {
+        const tab = this.getActiveTab();
+        if (!tab || !tab.textarea) {
+            this.showNotification('No file to export', 'warning');
+            return;
+        }
+        
+        const content = tab.textarea.value;
+        const defaultName = tab.fileInfo.Name.replace(/\\.[^/.]+$/, '') || 'Untitled';
+        
+        if (!ExportAsPDF) {
+            this.showNotification('PDF export not available', 'error');
+            return;
+        }
+        
+        try {
+            await ExportAsPDF(content, defaultName);
+        } catch (err) {
+
+            console.error('Failed to export PDF:', err);
+            this.showNotification('Failed to export PDF: ' + (err.message || err), 'error');
+        }
+    }
+
 
     // ============================================
     // Ollama AI Integration
