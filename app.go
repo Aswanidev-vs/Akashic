@@ -14,7 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-pdf/fpdf"
+	"Akashic/pdfexport"
+
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -775,7 +776,7 @@ func (a *App) PullModel(modelName string) error {
 	return nil
 }
 
-// ExportAsPDF exports the given content as a PDF file
+// ExportAsPDF exports content as a professionally formatted PDF using the pdfexport package
 func (a *App) ExportAsPDF(content string, defaultName string) error {
 	// Show save dialog for PDF
 	filePath, err := wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
@@ -792,54 +793,10 @@ func (a *App) ExportAsPDF(content string, defaultName string) error {
 		return nil // User cancelled
 	}
 
-	// Create PDF
-	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.AddPage()
-	pdf.SetAutoPageBreak(true, 20)
-
-	// Set font - use a monospace font for code/text content
-	pdf.SetFont("Courier", "", 10)
-
-	// Page dimensions
-	pageWidth, _ := pdf.GetPageSize()
-	margin := 15.0
-	contentWidth := pageWidth - 2*margin
-
-	// Split content into lines and add to PDF
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		// Handle long lines by wrapping them
-		if pdf.GetStringWidth(line) > contentWidth {
-			// Word wrap for long lines
-			words := strings.Fields(line)
-			currentLine := ""
-			for _, word := range words {
-				testLine := currentLine
-				if testLine != "" {
-					testLine += " "
-				}
-				testLine += word
-				if pdf.GetStringWidth(testLine) <= contentWidth {
-					currentLine = testLine
-				} else {
-					if currentLine != "" {
-						pdf.CellFormat(contentWidth, 5, currentLine, "", 1, "L", false, 0, "")
-					}
-					currentLine = word
-				}
-			}
-			if currentLine != "" {
-				pdf.CellFormat(contentWidth, 5, currentLine, "", 1, "L", false, 0, "")
-			}
-		} else {
-			pdf.CellFormat(contentWidth, 5, line, "", 1, "L", false, 0, "")
-		}
-	}
-
-	// Save PDF
-	err = pdf.OutputFileAndClose(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to save PDF: %w", err)
+	// Use the pdfexport package to generate the PDF
+	exporter := pdfexport.NewExporter()
+	if err := exporter.Export(content, filePath); err != nil {
+		return fmt.Errorf("failed to export PDF: %w", err)
 	}
 
 	return nil
