@@ -301,12 +301,110 @@ html, body {
     stroke: currentColor;
 }
 
+/* ===================== FORMATTING TOOLBAR ===================== */
+#formatting-toolbar {
+    display: flex;
+    align-items: center;
+    height: 36px;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0 12px;
+    gap: 8px;
+    user-select: none;
+}
+
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.toolbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 26px;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.toolbar-btn:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--border-light);
+    color: var(--text-primary);
+}
+
+.toolbar-btn.active {
+    background-color: var(--accent-subtle);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+.toolbar-separator {
+    width: 1px;
+    height: 20px;
+    background-color: var(--border-color);
+    margin: 0 4px;
+}
+
+.toolbar-select {
+    padding: 4px 8px;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    min-width: 80px;
+}
+
+.toolbar-select:hover {
+    border-color: var(--border-light);
+}
+
+.toolbar-select:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+.toolbar-color {
+    width: 28px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-primary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.toolbar-color:hover {
+    border-color: var(--accent-color);
+}
+
+.toolbar-color::-webkit-color-swatch-wrapper {
+    padding: 2px;
+}
+
+.toolbar-color::-webkit-color-swatch {
+    border-radius: 2px;
+    border: none;
+}
+
 /* ===================== MAIN CONTENT ===================== */
 #main-content {
     display: flex;
     flex: 1;
     overflow: hidden;
 }
+
 
 /* Editor Container */
 #editor-container {
@@ -361,7 +459,74 @@ html, body {
     font-weight: 500;
 }
 
-/* Textarea Editor (Fallback) */
+/* Rich Text Editor */
+.editor-content {
+    flex: 1;
+    height: 100%;
+    border: none;
+    outline: none;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-family);
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 12px;
+    overflow: auto;
+    tab-size: 4;
+}
+
+.editor-content:focus {
+    outline: none;
+}
+
+.editor-content::selection {
+    background-color: var(--accent-subtle);
+    color: var(--text-primary);
+}
+
+/* Rich text element styles within editor */
+.editor-content h1 {
+    font-size: 2em;
+    font-weight: bold;
+    margin: 0.67em 0;
+    color: var(--text-primary);
+}
+
+.editor-content h2 {
+    font-size: 1.5em;
+    font-weight: bold;
+    margin: 0.75em 0;
+    color: var(--text-primary);
+}
+
+.editor-content h3 {
+    font-size: 1.17em;
+    font-weight: bold;
+    margin: 0.83em 0;
+    color: var(--text-primary);
+}
+
+.editor-content p {
+    margin: 0.5em 0;
+}
+
+.editor-content b, .editor-content strong {
+    font-weight: bold;
+}
+
+.editor-content i, .editor-content em {
+    font-style: italic;
+}
+
+.editor-content u {
+    text-decoration: underline;
+}
+
+.editor-content span[style*="color"] {
+    /* Ensure colored text is visible */
+}
+
+/* Textarea Editor (Fallback) - Keep for compatibility */
 .editor-textarea {
     flex: 1;
     height: 100%;
@@ -387,6 +552,7 @@ html, body {
     background-color: var(--accent-subtle);
     color: var(--text-primary);
 }
+
 
 /* ===================== STATUS BAR ===================== */
 #status-bar {

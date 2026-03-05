@@ -56,9 +56,12 @@ class AkashicEditor {
         this.lineNumbersEl = null;
         this.minimapEl = null;
         this.wordWrap = true; // Enable word wrap by default for responsive text
-
+        
+        // Formatting state
+        this.isRichText = true; // Use rich text editor by default
         
         // Wait for DOM
+
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.init());
         } else {
@@ -583,59 +586,65 @@ class AkashicEditor {
     }
     
     createTextareaEditor(tab) {
-        console.log('Creating textarea editor for:', tab.id);
+        console.log('Creating rich text editor for:', tab.id);
         
         // Create wrapper for editor components
         const wrapper = document.createElement('div');
         wrapper.className = 'editor-wrapper';
         
-        const textarea = document.createElement('textarea');
-        textarea.className = 'editor-textarea';
-        textarea.value = tab.content;
-        textarea.spellcheck = false;
-        textarea.wrap = this.wordWrap ? 'soft' : 'off';
-
+        // Create contenteditable div for rich text
+        const editor = document.createElement('div');
+        editor.className = 'editor-content';
+        editor.contentEditable = true;
+        editor.spellcheck = false;
+        
+        // Set content - if tab.content is plain text, wrap in paragraph
+        if (tab.content && !tab.content.startsWith('<')) {
+            editor.innerHTML = `<p>${this.escapeHtml(tab.content).replace(/\n/g, '</p><p>')}</p>`;
+        } else {
+            editor.innerHTML = tab.content || '<p><br></p>';
+        }
         
         // Apply current zoom
-        textarea.style.fontSize = `${this.zoomLevel}%`;
+        editor.style.fontSize = `${this.zoomLevel}%`;
         
         // Event handlers
-        textarea.addEventListener('input', () => {
+        editor.addEventListener('input', () => {
             this.onEditorChange(tab);
             if (this.showLineNumbers) this.updateLineNumbers(tab);
             if (this.showMinimap) this.updateMinimap(tab);
         });
         
-        textarea.addEventListener('click', () => {
+        editor.addEventListener('click', () => {
             this.updateCursorPosition(tab);
             if (this.showLineNumbers) this.updateLineNumbers(tab);
+            this.updateToolbarState();
         });
         
-        textarea.addEventListener('keyup', () => {
+        editor.addEventListener('keyup', () => {
             this.updateCursorPosition(tab);
             if (this.showLineNumbers) this.updateLineNumbers(tab);
+            this.updateToolbarState();
         });
         
-        textarea.addEventListener('scroll', () => {
+        editor.addEventListener('scroll', () => {
             if (this.showLineNumbers) this.updateLineNumbers(tab);
             if (this.showMinimap) this.updateMinimap(tab);
         });
         
-        textarea.addEventListener('keydown', (e) => {
-            // Handle Tab key
+        editor.addEventListener('keydown', (e) => {
+            // Handle Tab key - insert non-breaking space or tab character
             if (e.key === 'Tab') {
                 e.preventDefault();
-                const start = textarea.selectionStart;
-                const end = textarea.selectionEnd;
-                textarea.value = textarea.value.substring(0, start) + '\t' + textarea.value.substring(end);
-                textarea.selectionStart = textarea.selectionEnd = start + 1;
+                document.execCommand('insertHTML', false, '&nbsp;&nbsp;&nbsp;&nbsp;');
                 this.onEditorChange(tab);
             }
         });
         
-        wrapper.appendChild(textarea);
+        wrapper.appendChild(editor);
         this.elements.editorContainer.appendChild(wrapper);
-        tab.textarea = textarea;
+        tab.editor = editor;
+        tab.textarea = editor; // Keep compatibility
         tab.wrapper = wrapper;
         
         // Apply current view settings
@@ -643,15 +652,157 @@ class AkashicEditor {
             this.updateEditorView(tab);
         }
         
-        // Focus the textarea
+        // Setup formatting toolbar
+        this.setupFormattingToolbar();
+        
+        // Focus the editor
         setTimeout(() => {
-            textarea.focus();
-            console.log('Textarea focused');
+            editor.focus();
+            console.log('Rich text editor focused');
         }, 10);
     }
     
+    setupFormattingToolbar() {
+        // Bold button
+        const boldBtn = document.getElementById('btn-bold');
+        if (boldBtn) {
+            boldBtn.addEventListener('click', () => {
+                document.execCommand('bold', false, null);
+                this.updateToolbarState();
+                const tab = this.getActiveTab();
+                if (tab) this.onEditorChange(tab);
+            });
+        }
+        
+        // Italic button
+        const italicBtn = document.getElementById('btn-italic');
+        if (italicBtn) {
+            italicBtn.addEventListener('click', () => {
+                document.execCommand('italic', false, null);
+                this.updateToolbarState();
+                const tab = this.getActiveTab();
+                if (tab) this.onEditorChange(tab);
+            });
+        }
+        
+        // Underline button
+        const underlineBtn = document.getElementById('btn-underline');
+        if (underlineBtn) {
+            underlineBtn.addEventListener('click', () => {
+                document.execCommand('underline', false, null);
+                this.updateToolbarState();
+                const tab = this.getActiveTab();
+                if (tab) this.onEditorChange(tab);
+            });
+        }
+        
+        // Heading select
+        const headingSelect = document.getElementById('select-heading');
+        if (headingSelect) {
+            headingSelect.addEventListener('change', (e) => {
+                const tag = e.target.value;
+                this.formatBlock(tag);
+                const tab = this.getActiveTab();
+                if (tab) this.onEditorChange(tab);
+            });
+        }
+        
+        // Font size select
+        const fontSizeSelect = document.getElementById('select-fontsize');
+        if (fontSizeSelect) {
+            fontSizeSelect.addEventListener('change', (e) => {
+                const size = e.target.value;
+                document.execCommand('fontSize', false, '7');
+                // Apply actual size via style
+                const selection = window.getSelection();
+                if (selection.rangeCount > 0) {
+                    const range = selection.getRangeAt(0);
+                    const span = document.createElement('span');
+                    span.style.fontSize = size + 'px';
+                    try {
+                        range.surroundContents(span);
+                    } catch (e) {
+                        // If can't surround, just insert HTML
+                        document.execCommand('insertHTML', false, `<span style="font-size: ${size}px;">${selection.toString()}</span>`);
+                    }
+                }
+                const tab = this.getActiveTab();
+                if (tab) this.onEditorChange(tab);
+            });
+        }
+        
+        // Color picker
+        const colorPicker = document.getElementById('select-color');
+        if (colorPicker) {
+            colorPicker.addEventListener('input', (e) => {
+                const color = e.target.value;
+                document.execCommand('foreColor', false, color);
+                const tab = this.getActiveTab();
+                if (tab) this.onEditorChange(tab);
+            });
+        }
+    }
+    
+    updateToolbarState() {
+        // Update button active states based on current selection
+        const boldBtn = document.getElementById('btn-bold');
+        const italicBtn = document.getElementById('btn-italic');
+        const underlineBtn = document.getElementById('btn-underline');
+        
+        if (boldBtn) {
+            boldBtn.classList.toggle('active', document.queryCommandState('bold'));
+        }
+        if (italicBtn) {
+            italicBtn.classList.toggle('active', document.queryCommandState('italic'));
+        }
+        if (underlineBtn) {
+            underlineBtn.classList.toggle('active', document.queryCommandState('underline'));
+        }
+    }
+    
+    formatBlock(tagName) {
+        // Format current block as heading or paragraph
+        const selection = window.getSelection();
+        if (selection.rangeCount === 0) return;
+        
+        const range = selection.getRangeAt(0);
+        let node = range.commonAncestorContainer;
+        
+        // Find the block element
+        while (node && node !== document.body && !/^P|H[1-6]|DIV$/i.test(node.nodeName)) {
+            node = node.parentElement;
+        }
+        
+        if (!node || node === document.body) {
+            // No block found, use formatBlock command
+            document.execCommand('formatBlock', false, tagName);
+            return;
+        }
+        
+        // Create new element
+        const newElement = document.createElement(tagName);
+        
+        // Copy content
+        newElement.innerHTML = node.innerHTML;
+        
+        // Replace old node
+        node.parentNode.replaceChild(newElement, node);
+        
+        // Restore selection
+        selection.removeAllRanges();
+        const newRange = document.createRange();
+        newRange.selectNodeContents(newElement);
+        selection.addRange(newRange);
+    }
+
+    
     onEditorChange(tab) {
-        tab.content = tab.textarea.value;
+        // Get content from rich text editor
+        if (tab.editor) {
+            tab.content = tab.editor.innerHTML;
+        } else if (tab.textarea) {
+            tab.content = tab.textarea.value;
+        }
         
         if (!tab.fileInfo.IsDirty) {
             tab.fileInfo.IsDirty = true;
@@ -668,18 +819,38 @@ class AkashicEditor {
             }
         }
     }
+
     
     updateCursorPosition(tab) {
-        if (!tab.textarea) return;
+        if (!tab.editor && !tab.textarea) return;
         
-        const text = tab.textarea.value;
-        const pos = tab.textarea.selectionStart;
-        const lines = text.substring(0, pos).split('\n');
-        const lineNum = lines.length;
-        const colNum = lines[lines.length - 1].length + 1;
+        let lineNum = 1;
+        let colNum = 1;
+        
+        if (tab.editor) {
+            // For rich text editor, calculate based on selection
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                const preCaretRange = range.cloneRange();
+                preCaretRange.selectNodeContents(tab.editor);
+                preCaretRange.setEnd(range.endContainer, range.endOffset);
+                const text = preCaretRange.toString();
+                const lines = text.split('\n');
+                lineNum = lines.length;
+                colNum = lines[lines.length - 1].length + 1;
+            }
+        } else if (tab.textarea) {
+            const text = tab.textarea.value;
+            const pos = tab.textarea.selectionStart;
+            const lines = text.substring(0, pos).split('\n');
+            lineNum = lines.length;
+            colNum = lines[lines.length - 1].length + 1;
+        }
         
         this.elements.statusPosition.textContent = `Ln ${lineNum}, Col ${colNum}`;
     }
+
     
     closeTab(tabId) {
         const tabIndex = this.tabs.findIndex(t => t.id === tabId);
@@ -775,10 +946,18 @@ class AkashicEditor {
     
     async saveTab(tab = null) {
         if (!tab) tab = this.tabs.find(t => t.id === this.activeTabId);
-        if (!tab || !tab.textarea) return;
+        if (!tab || (!tab.textarea && !tab.editor)) return;
         
-        const content = tab.textarea.value;
+        // Get content from rich text editor or textarea
+        let content;
+        if (tab.editor) {
+            content = tab.editor.innerHTML;
+        } else {
+            content = tab.textarea.value;
+        }
+        
         console.log('Saving file:', tab.fileInfo.Name);
+
         
         if (!SaveFile || !SaveFileAs) {
             this.showNotification('Save not available', 'error');
@@ -823,11 +1002,18 @@ class AkashicEditor {
     
     async saveAs() {
         const tab = this.tabs.find(t => t.id === this.activeTabId);
-        if (!tab || !tab.textarea) return;
+        if (!tab || (!tab.textarea && !tab.editor)) return;
         
-        const content = tab.textarea.value;
+        // Get content from rich text editor or textarea
+        let content;
+        if (tab.editor) {
+            content = tab.editor.innerHTML;
+        } else {
+            content = tab.textarea.value;
+        }
         
         if (!SaveFileAs) {
+
             this.showNotification('Save As not available', 'error');
             return;
         }
@@ -997,11 +1183,16 @@ class AkashicEditor {
     
     applyZoom() {
         const tab = this.tabs.find(t => t.id === this.activeTabId);
-        if (tab && tab.textarea) {
-            tab.textarea.style.fontSize = `${this.zoomLevel}%`;
+        if (tab) {
+            if (tab.editor) {
+                tab.editor.style.fontSize = `${this.zoomLevel}%`;
+            } else if (tab.textarea) {
+                tab.textarea.style.fontSize = `${this.zoomLevel}%`;
+            }
         }
         this.elements.statusZoom.textContent = `${this.zoomLevel}%`;
     }
+
     
     toggleFullscreen() {
         if (!document.fullscreenElement) {
@@ -1042,15 +1233,16 @@ class AkashicEditor {
     toggleWordWrap() {
         this.wordWrap = !this.wordWrap;
         
-        // Apply to all tabs
+        // Apply to all tabs (only affects textarea, not rich text)
         this.tabs.forEach(tab => {
-            if (tab.textarea) {
+            if (tab.textarea && tab.textarea.tagName === 'TEXTAREA') {
                 tab.textarea.wrap = this.wordWrap ? 'soft' : 'off';
             }
         });
         
         this.showNotification(`Word wrap ${this.wordWrap ? 'enabled' : 'disabled'}`);
     }
+
 
     
     toggleLineNumbers() {
@@ -1131,13 +1323,27 @@ class AkashicEditor {
     }
     
     updateLineNumbers(tab) {
-        if (!this.lineNumbersEl || !tab.textarea) return;
+        if (!this.lineNumbersEl || (!tab.textarea && !tab.editor)) return;
         
-        const lines = tab.textarea.value.split('\n');
-        const scrollTop = tab.textarea.scrollTop;
+        let lines = [];
+        let scrollTop = 0;
+        let clientHeight = 0;
+        
+        if (tab.editor) {
+            // For rich text editor, count paragraphs and line breaks
+            const text = tab.editor.innerText || '';
+            lines = text.split('\n');
+            scrollTop = tab.editor.scrollTop;
+            clientHeight = tab.editor.clientHeight;
+        } else {
+            lines = tab.textarea.value.split('\n');
+            scrollTop = tab.textarea.scrollTop;
+            clientHeight = tab.textarea.clientHeight;
+        }
+        
         const lineHeight = 21; // 14px * 1.5 line-height
         const startLine = Math.floor(scrollTop / lineHeight);
-        const visibleLines = Math.ceil(tab.textarea.clientHeight / lineHeight);
+        const visibleLines = Math.ceil(clientHeight / lineHeight);
         
         let html = '';
         const currentLine = this.getCurrentLineNumber(tab);
@@ -1152,26 +1358,61 @@ class AkashicEditor {
     }
     
     getCurrentLineNumber(tab) {
-        if (!tab.textarea) return 1;
-        const text = tab.textarea.value.substring(0, tab.textarea.selectionStart);
+        if (!tab.textarea && !tab.editor) return 1;
+        
+        let text = '';
+        let selectionStart = 0;
+        
+        if (tab.editor) {
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                const preCaretRange = range.cloneRange();
+                preCaretRange.selectNodeContents(tab.editor);
+                preCaretRange.setEnd(range.endContainer, range.endOffset);
+                text = preCaretRange.toString();
+            } else {
+                text = tab.editor.innerText || '';
+            }
+        } else {
+            text = tab.textarea.value.substring(0, tab.textarea.selectionStart);
+        }
+        
         return text.split('\n').length;
     }
+
     
     updateMinimap(tab) {
-        if (!this.minimapEl || !tab.textarea) return;
+        if (!this.minimapEl || (!tab.textarea && !tab.editor)) return;
         
         const minimapContent = this.minimapEl.querySelector('.minimap-content');
         if (!minimapContent) return;
         
         // Show condensed version of content
-        const content = tab.textarea.value;
+        let content = '';
+        let scrollTop = 0;
+        let scrollHeight = 0;
+        let clientHeight = 0;
+        
+        if (tab.editor) {
+            content = tab.editor.innerText || '';
+            scrollTop = tab.editor.scrollTop;
+            scrollHeight = tab.editor.scrollHeight;
+            clientHeight = tab.editor.clientHeight;
+        } else {
+            content = tab.textarea.value;
+            scrollTop = tab.textarea.scrollTop;
+            scrollHeight = tab.textarea.scrollHeight;
+            clientHeight = tab.textarea.clientHeight;
+        }
+        
         const maxChars = 5000;
         const displayContent = content.length > maxChars ? content.substring(0, maxChars) + '...' : content;
         minimapContent.textContent = displayContent;
         
         // Update viewport indicator
-        const scrollPercent = tab.textarea.scrollTop / (tab.textarea.scrollHeight - tab.textarea.clientHeight || 1);
-        const viewportHeight = (tab.textarea.clientHeight / tab.textarea.scrollHeight) * 100;
+        const scrollPercent = scrollTop / (scrollHeight - clientHeight || 1);
+        const viewportHeight = (clientHeight / scrollHeight) * 100;
         
         let viewport = this.minimapEl.querySelector('.minimap-viewport');
         if (!viewport) {
@@ -1183,6 +1424,7 @@ class AkashicEditor {
         viewport.style.top = `${scrollPercent * (100 - viewportHeight)}%`;
         viewport.style.height = `${Math.max(viewportHeight, 10)}%`;
     }
+
     
     // ============================================
     // Dialogs
@@ -1846,24 +2088,53 @@ class AkashicEditor {
                 return;
             }
             
-            // Handle zoom shortcuts specially (Ctrl++, Ctrl+-, Ctrl+0)
-            if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
-                if (e.key === '+' || e.key === '=') {
+        // Handle zoom shortcuts specially (Ctrl++, Ctrl+-, Ctrl+0)
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+            if (e.key === '+' || e.key === '=') {
+                e.preventDefault();
+                this.zoomIn();
+                return;
+            }
+            if (e.key === '-') {
+                e.preventDefault();
+                this.zoomOut();
+                return;
+            }
+            if (e.key === '0') {
+                e.preventDefault();
+                this.resetZoom();
+                return;
+            }
+        }
+        
+        // Handle formatting shortcuts (Ctrl+B, Ctrl+I, Ctrl+U)
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+            const tab = this.getActiveTab();
+            if (tab && tab.editor) {
+                if (e.key.toLowerCase() === 'b') {
                     e.preventDefault();
-                    this.zoomIn();
+                    document.execCommand('bold', false, null);
+                    this.updateToolbarState();
+                    this.onEditorChange(tab);
                     return;
                 }
-                if (e.key === '-') {
+                if (e.key.toLowerCase() === 'i') {
                     e.preventDefault();
-                    this.zoomOut();
+                    document.execCommand('italic', false, null);
+                    this.updateToolbarState();
+                    this.onEditorChange(tab);
                     return;
                 }
-                if (e.key === '0') {
+                if (e.key.toLowerCase() === 'u') {
                     e.preventDefault();
-                    this.resetZoom();
+                    document.execCommand('underline', false, null);
+                    this.updateToolbarState();
+                    this.onEditorChange(tab);
                     return;
                 }
             }
+        }
+
             
             // Check for matching shortcut
             for (const [name, shortcut] of Object.entries(this.shortcuts)) {
@@ -2111,12 +2382,20 @@ class AkashicEditor {
     
     async exportAsPDF() {
         const tab = this.getActiveTab();
-        if (!tab || !tab.textarea) {
+        if (!tab || (!tab.textarea && !tab.editor)) {
             this.showNotification('No file to export', 'warning');
             return;
         }
         
-        const content = tab.textarea.value;
+        // Get content - convert HTML to text with markdown for PDF export
+        let content;
+        if (tab.editor) {
+            // Convert HTML content to markdown-like format for PDF export
+            content = this.htmlToMarkdown(tab.editor.innerHTML);
+        } else {
+            content = tab.textarea.value;
+        }
+        
         const defaultName = tab.fileInfo.Name.replace(/\\.[^/.]+$/, '') || 'Untitled';
         
         if (!ExportAsPDF) {
@@ -2127,11 +2406,89 @@ class AkashicEditor {
         try {
             await ExportAsPDF(content, defaultName);
         } catch (err) {
-
             console.error('Failed to export PDF:', err);
             this.showNotification('Failed to export PDF: ' + (err.message || err), 'error');
         }
     }
+    
+    htmlToMarkdown(html) {
+        // Convert HTML to markdown-like format for PDF export
+        // Preserves color and font size information in special markers
+        let text = html;
+        
+        // Helper to extract style attributes
+        const extractStyle = (tag) => {
+            const colorMatch = tag.match(/color:\s*([^;"]+)/i);
+            const sizeMatch = tag.match(/font-size:\s*([^;"]+)/i);
+            return {
+                color: colorMatch ? colorMatch[1].trim() : null,
+                size: sizeMatch ? sizeMatch[1].trim() : null
+            };
+        };
+        
+        // Helper to build style prefix
+        const buildStylePrefix = (styles) => {
+            let prefix = '';
+            if (styles.color) prefix += `[COLOR:${styles.color}]`;
+            if (styles.size) prefix += `[SIZE:${styles.size}]`;
+            return prefix;
+        };
+        
+        // Helper to build style suffix
+        const buildStyleSuffix = (styles) => {
+            let suffix = '';
+            if (styles.size) suffix += '[/SIZE]';
+            if (styles.color) suffix += '[/COLOR]';
+            return suffix;
+        };
+        
+        // Replace heading tags
+        text = text.replace(/<h1[^>]*>(.*?)<\/h1>/gi, (match, content) => {
+            const styles = extractStyle(match);
+            return '# ' + buildStylePrefix(styles) + content + buildStyleSuffix(styles) + '\n\n';
+        });
+        text = text.replace(/<h2[^>]*>(.*?)<\/h2>/gi, (match, content) => {
+            const styles = extractStyle(match);
+            return '## ' + buildStylePrefix(styles) + content + buildStyleSuffix(styles) + '\n\n';
+        });
+        text = text.replace(/<h3[^>]*>(.*?)<\/h3>/gi, (match, content) => {
+            const styles = extractStyle(match);
+            return '### ' + buildStylePrefix(styles) + content + buildStyleSuffix(styles) + '\n\n';
+        });
+        
+        // Replace styled spans
+        text = text.replace(/<span[^>]*style="([^"]*)"[^>]*>(.*?)<\/span>/gi, (match, style, content) => {
+            const styles = extractStyle(match);
+            return buildStylePrefix(styles) + content + buildStyleSuffix(styles);
+        });
+        
+        // Replace bold and italic
+        text = text.replace(/<b[^>]*>(.*?)<\/b>/gi, '**$1**');
+        text = text.replace(/<strong[^>]*>(.*?)<\/strong>/gi, '**$1**');
+        text = text.replace(/<i[^>]*>(.*?)<\/i>/gi, '*$1*');
+        text = text.replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*');
+        text = text.replace(/<u[^>]*>(.*?)<\/u>/gi, '__$1__');
+        
+        // Replace paragraphs and breaks
+        text = text.replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n\n');
+        text = text.replace(/<br\s*\/?>/gi, '\n');
+        
+        // Replace divs
+        text = text.replace(/<div[^>]*>(.*?)<\/div>/gi, '$1\n');
+        
+        // Remove remaining HTML tags
+        text = text.replace(/<[^>]+>/g, '');
+        
+        // Decode HTML entities
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = text;
+        text = textarea.value;
+        
+        return text.trim();
+    }
+
+
+
 
 
     // ============================================
@@ -2339,15 +2696,21 @@ class AkashicEditor {
         }
         
         const tab = this.getActiveTab();
-        if (!tab || !tab.textarea) return;
+        if (!tab) return;
         
-        const start = tab.textarea.selectionStart;
-        const end = tab.textarea.selectionEnd;
-        const text = tab.textarea.value;
-        
-        tab.textarea.value = text.substring(0, start) + this.lastAIResponse + text.substring(end);
-        tab.textarea.setSelectionRange(start + this.lastAIResponse.length, start + this.lastAIResponse.length);
-        this.onEditorChange(tab);
+        if (tab.editor) {
+            // Rich text editor
+            document.execCommand('insertHTML', false, this.escapeHtml(this.lastAIResponse).replace(/\n/g, '<br>'));
+            this.onEditorChange(tab);
+        } else if (tab.textarea) {
+            const start = tab.textarea.selectionStart;
+            const end = tab.textarea.selectionEnd;
+            const text = tab.textarea.value;
+            
+            tab.textarea.value = text.substring(0, start) + this.lastAIResponse + text.substring(end);
+            tab.textarea.setSelectionRange(start + this.lastAIResponse.length, start + this.lastAIResponse.length);
+            this.onEditorChange(tab);
+        }
         this.showNotification('AI response inserted', 'success');
     }
     
@@ -2358,18 +2721,26 @@ class AkashicEditor {
         }
         
         const tab = this.getActiveTab();
-        if (!tab || !tab.textarea) return;
+        if (!tab) return;
         
-        const start = tab.textarea.selectionStart;
-        const end = tab.textarea.selectionEnd;
-        const text = tab.textarea.value;
-        
-        // Replace selected text or insert at cursor
-        tab.textarea.value = text.substring(0, start) + this.lastAIResponse + text.substring(end);
-        tab.textarea.setSelectionRange(start, start + this.lastAIResponse.length);
-        this.onEditorChange(tab);
+        if (tab.editor) {
+            // Rich text editor
+            document.execCommand('selectAll', false, null);
+            document.execCommand('insertHTML', false, this.escapeHtml(this.lastAIResponse).replace(/\n/g, '<br>'));
+            this.onEditorChange(tab);
+        } else if (tab.textarea) {
+            const start = tab.textarea.selectionStart;
+            const end = tab.textarea.selectionEnd;
+            const text = tab.textarea.value;
+            
+            // Replace selected text or insert at cursor
+            tab.textarea.value = text.substring(0, start) + this.lastAIResponse + text.substring(end);
+            tab.textarea.setSelectionRange(start, start + this.lastAIResponse.length);
+            this.onEditorChange(tab);
+        }
         this.showNotification('Text replaced with AI response', 'success');
     }
+
     
     setupAIEventListeners() {
         // Check Ollama button
