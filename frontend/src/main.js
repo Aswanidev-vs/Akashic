@@ -2490,7 +2490,11 @@ class AkashicEditor {
             const doc = parser.parseFromString(text, 'text/html');
             text = doc.documentElement.textContent || '';
         } catch (e) {
-            // Fallback: keep original text if DOMParser fails
+            console.error('DOMParser failed during HTML sanitization:', e);
+            // Fallback: In case of DOMParser failure, it's safer to strip all content
+            // or handle it with a more robust fallback that doesn't reintroduce vulnerabilities.
+            // For now, setting to empty string to prevent unsanitized HTML from proceeding.
+            text = ''; 
         }
         
         // Decode HTML entities
