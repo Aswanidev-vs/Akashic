@@ -2484,8 +2484,14 @@ class AkashicEditor {
         // Replace divs
         text = text.replace(/<div[^>]*>(.*?)<\/div>/gi, '$1\n');
         
-        // Remove remaining HTML tags
-        text = text.replace(/<[^>]+>/g, '');
+        // Remove remaining HTML tags using DOM parsing to avoid partial/script remnants
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(text, 'text/html');
+            text = doc.documentElement.textContent || '';
+        } catch (e) {
+            // Fallback: keep original text if DOMParser fails
+        }
         
         // Decode HTML entities
         const textarea = document.createElement('textarea');
