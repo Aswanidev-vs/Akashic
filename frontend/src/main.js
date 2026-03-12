@@ -700,8 +700,11 @@ class AkashicEditor {
         const headingSelect = document.getElementById('select-heading');
         if (headingSelect) {
             headingSelect.addEventListener('change', (e) => {
-                const tag = e.target.value;
-                this.formatBlock(tag);
+                const rawTag = e.target.value;
+                const allowedTags = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'DIV'];
+                const normalizedTag = typeof rawTag === 'string' ? rawTag.trim().toUpperCase() : '';
+                const safeTag = allowedTags.includes(normalizedTag) ? normalizedTag : 'P';
+                this.formatBlock(safeTag);
                 const tab = this.getActiveTab();
                 if (tab) this.onEditorChange(tab);
             });
@@ -761,6 +764,11 @@ class AkashicEditor {
     }
     
     formatBlock(tagName) {
+        // Normalize and validate the requested block tag to avoid using arbitrary values
+        const allowedTags = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'DIV'];
+        const normalizedTag = typeof tagName === 'string' ? tagName.trim().toUpperCase() : '';
+        const safeTag = allowedTags.includes(normalizedTag) ? normalizedTag : 'P';
+
         // Format current block as heading or paragraph
         const selection = window.getSelection();
         if (selection.rangeCount === 0) return;
@@ -775,12 +783,12 @@ class AkashicEditor {
         
         if (!node || node === document.body) {
             // No block found, use formatBlock command
-            document.execCommand('formatBlock', false, tagName);
+            document.execCommand('formatBlock', false, safeTag);
             return;
         }
         
         // Create new element
-        const newElement = document.createElement(tagName);
+        const newElement = document.createElement(safeTag);
         
         // Copy content
         newElement.innerHTML = node.innerHTML;
