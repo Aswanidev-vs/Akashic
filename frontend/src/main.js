@@ -2490,7 +2490,9 @@ class AkashicEditor {
             const doc = parser.parseFromString(text, 'text/html');
             text = doc.documentElement.textContent || '';
         } catch (e) {
-            // Fallback: keep original text if DOMParser fails
+            // Fallback to regex-based stripping if DOMParser fails.
+            console.error('DOMParser sanitization failed, falling back to regex:', e);
+            text = text.replace(/<[^>]+>/g, '');
         }
         
         // Decode HTML entities
