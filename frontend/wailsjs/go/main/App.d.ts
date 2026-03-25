@@ -30,6 +30,8 @@ export function GetChatMessages(arg1:number):Promise<Array<main.Message>>;
 
 export function GetChats():Promise<Array<main.Chat>>;
 
+export function GetExtensions():Promise<Array<string>>;
+
 export function GetInstalledModels():Promise<Array<main.OllamaModel>>;
 
 export function GetRecentFiles():Promise<Array<string>>;

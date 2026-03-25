@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -776,7 +777,6 @@ func (a *App) PullModel(modelName string) error {
 	return nil
 }
 
-// ExportAsPDF exports content as a professionally formatted PDF using the pdfexport package
 func (a *App) ExportAsPDF(content string, defaultName string) error {
 	// Show save dialog for PDF
 	filePath, err := wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
@@ -800,4 +800,26 @@ func (a *App) ExportAsPDF(content string, defaultName string) error {
 	}
 
 	return nil
+}
+
+// GetExtensions returns a list of user‑provided extension files (JS or CSS)
+// located in the frontend/public/extensions folder. These files are served as
+// static assets by Wails and can be loaded dynamically by the frontend.
+func (a *App) GetExtensions() []string {
+	var files []string
+	dir := "frontend/public/extensions"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return files
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".css") {
+			files = append(files, name)
+		}
+	}
+	return files
 }

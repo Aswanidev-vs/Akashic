@@ -58,6 +58,10 @@ export function GetChats() {
   return window['go']['main']['App']['GetChats']();
 }
 
+export function GetExtensions() {
+  return window['go']['main']['App']['GetExtensions']();
+}
+
 export function GetInstalledModels() {
   return window['go']['main']['App']['GetInstalledModels']();
 }

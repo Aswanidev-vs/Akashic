@@ -1141,7 +1141,7 @@ class AkashicEditor {
             case 'zoom-in': this.zoomIn(); break;
             case 'zoom-out': this.zoomOut(); break;
             case 'reset-zoom': this.resetZoom(); break;
-            case 'dark-mode': document.body.classList.toggle('light-theme'); break;
+
             case 'fullscreen': this.toggleFullscreen(); break;
             
             case 'ai-sidebar': this.toggleAISidebar(); break;
