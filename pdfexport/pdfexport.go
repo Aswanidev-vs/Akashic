@@ -24,21 +24,32 @@ type textStyle struct {
 	fontName string
 	fontSize float64
 	indent   float64 // left indent in mm
+	color    string  // RGB color in format "R G B" (0-1 range)
 }
 
 var (
 	// Predefined styles
-	styleTitle     = textStyle{fontBold, 18, 0}
-	styleH1        = textStyle{fontBold, 16, 0}
-	styleH2        = textStyle{fontBold, 14, 0}
-	styleH3        = textStyle{fontBold, 12, 0}
-	styleBody      = textStyle{fontRegular, 10.5, 0}
-	styleBullet    = textStyle{fontRegular, 10.5, 8}
-	styleSubBullet = textStyle{fontRegular, 10.5, 14}
-	styleNumbered  = textStyle{fontRegular, 10.5, 8}
+	styleTitle     = textStyle{fontBold, 18, 0, "0 0 0"}
+	styleH1        = textStyle{fontBold, 16, 0, "0 0 0"}
+	styleH2        = textStyle{fontBold, 14, 0, "0 0 0"}
+	styleH3        = textStyle{fontBold, 12, 0, "0 0 0"}
+	styleBody      = textStyle{fontRegular, 10.5, 0, "0 0 0"}
+	styleBullet    = textStyle{fontRegular, 10.5, 8, "0 0 0"}
+	styleSubBullet = textStyle{fontRegular, 10.5, 14, "0 0 0"}
+	styleNumbered  = textStyle{fontRegular, 10.5, 8, "0 0 0"}
 
 	// Regex for numbered list items like "1.", "2.", "1)", etc.
 	numberedListRe = regexp.MustCompile(`^\d+[\.\)]\s+`)
+
+	// Regex for color markers [COLOR:#rrggbb] or [COLOR:rgb(r,g,b)]
+	colorMarkerRe = regexp.MustCompile(`\[COLOR:([^\]]+)\]`)
+
+	// Regex for size markers [SIZE:xxpx]
+	sizeMarkerRe = regexp.MustCompile(`\[SIZE:([^\]]+)\]`)
+
+	// Regex for closing markers
+	colorCloseRe = regexp.MustCompile(`\[/COLOR\]`)
+	sizeCloseRe  = regexp.MustCompile(`\[/SIZE\]`)
 )
 
 // Exporter handles PDF export operations
@@ -114,9 +125,25 @@ func (e *Exporter) Export(content string, filePath string) error {
 			xPt := (marginLeft + style.indent) * 2.83465
 			yPt := (pageHeightMM - y) * 2.83465
 
-			page.addText(line, xPt, yPt, style.fontSize, style.fontName)
+			// Parse inline color and size markers in the line
+			segments := parseStyleSegments(line, style)
+
+			currentX := xPt
+			for _, seg := range segments {
+				// Calculate segment width and position
+				segWidth := estimateTextWidth(seg.text, seg.style.fontSize)
+				page.addTextWithColor(seg.text, currentX, yPt, seg.style.fontSize, seg.style.fontName, seg.style.color)
+				currentX += segWidth * 2.83465 // Convert mm to points
+			}
+
+			// If no segments were parsed (plain text), add the whole line
+			if len(segments) == 0 {
+				page.addTextWithColor(line, xPt, yPt, style.fontSize, style.fontName, style.color)
+			}
+
 			y += lineHeight
 		}
+
 	}
 
 	return doc.write(filePath)
@@ -129,7 +156,14 @@ type contentBlock struct {
 	spaceBefore float64 // mm of space before this block
 }
 
+// styledSegment represents a text segment with inline styling
+type styledSegment struct {
+	text  string
+	style textStyle
+}
+
 // parseContent converts raw text into styled content blocks
+
 func (e *Exporter) parseContent(content string) []contentBlock {
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
 
@@ -334,6 +368,7 @@ type pdfText struct {
 	x, y     float64
 	fontSize float64
 	fontName string
+	color    string // RGB color in format "R G B" (0-1 range)
 }
 
 func newPDFDocument() *pdfDocument {
@@ -357,6 +392,18 @@ func (p *pdfPage) addText(text string, x, y, fontSize float64, fontName string) 
 		y:        y,
 		fontSize: fontSize,
 		fontName: fontName,
+		color:    "0 0 0", // Default black
+	})
+}
+
+func (p *pdfPage) addTextWithColor(text string, x, y, fontSize float64, fontName string, color string) {
+	p.texts = append(p.texts, pdfText{
+		text:     text,
+		x:        x,
+		y:        y,
+		fontSize: fontSize,
+		fontName: fontName,
+		color:    color,
 	})
 }
 
@@ -450,6 +497,7 @@ func (p *pdfPage) buildContentStream() []byte {
 
 	currentFont := ""
 	currentSize := 0.0
+	currentColor := ""
 
 	for _, text := range p.texts {
 		// Only emit font change when needed
@@ -457,6 +505,12 @@ func (p *pdfPage) buildContentStream() []byte {
 			buf.WriteString(fmt.Sprintf("%s %.1f Tf\n", text.fontName, text.fontSize))
 			currentFont = text.fontName
 			currentSize = text.fontSize
+		}
+
+		// Emit color change when needed
+		if text.color != currentColor && text.color != "" {
+			buf.WriteString(text.color + " rg\n") // Set RGB color for non-stroking (text)
+			currentColor = text.color
 		}
 
 		// Absolute positioning via text matrix
@@ -500,4 +554,200 @@ func compressStream(data []byte) []byte {
 	w.Write(data)
 	w.Close()
 	return buf.Bytes()
+}
+
+// parseStyleSegments parses a line of text with style markers into segments
+func parseStyleSegments(line string, baseStyle textStyle) []styledSegment {
+	var segments []styledSegment
+
+	// Current style state (copy from base)
+	currentStyle := baseStyle
+
+	// Stack for nested styles
+	var styleStack []textStyle
+
+	// Find all markers and split text
+	remaining := line
+	for len(remaining) > 0 {
+		// Find the next marker
+		colorOpenIdx := colorMarkerRe.FindStringIndex(remaining)
+		sizeOpenIdx := sizeMarkerRe.FindStringIndex(remaining)
+		colorCloseIdx := colorCloseRe.FindStringIndex(remaining)
+		sizeCloseIdx := sizeCloseRe.FindStringIndex(remaining)
+
+		// Find the earliest marker
+		nextIdx := -1
+		var markerType string
+
+		if colorOpenIdx != nil && (nextIdx == -1 || colorOpenIdx[0] < nextIdx) {
+			nextIdx = colorOpenIdx[0]
+			markerType = "color_open"
+		}
+		if sizeOpenIdx != nil && (nextIdx == -1 || sizeOpenIdx[0] < nextIdx) {
+			nextIdx = sizeOpenIdx[0]
+			markerType = "size_open"
+		}
+		if colorCloseIdx != nil && (nextIdx == -1 || colorCloseIdx[0] < nextIdx) {
+			nextIdx = colorCloseIdx[0]
+			markerType = "color_close"
+		}
+		if sizeCloseIdx != nil && (nextIdx == -1 || sizeCloseIdx[0] < nextIdx) {
+			nextIdx = sizeCloseIdx[0]
+			markerType = "size_close"
+		}
+
+		// If no markers found, add remaining as plain text
+		if nextIdx == -1 {
+			if len(remaining) > 0 {
+				segments = append(segments, styledSegment{
+					text:  remaining,
+					style: currentStyle,
+				})
+			}
+			break
+		}
+
+		// Add text before marker
+		if nextIdx > 0 {
+			segments = append(segments, styledSegment{
+				text:  remaining[:nextIdx],
+				style: currentStyle,
+			})
+		}
+
+		// Process marker
+		switch markerType {
+		case "color_open":
+			matches := colorMarkerRe.FindStringSubmatch(remaining[nextIdx:])
+			if len(matches) > 1 {
+				// Push current style to stack
+				styleStack = append(styleStack, currentStyle)
+				// Parse color
+				colorStr := matches[1]
+				currentStyle.color = parseColor(colorStr)
+			}
+			remaining = remaining[nextIdx+len(matches[0]):]
+
+		case "size_open":
+			matches := sizeMarkerRe.FindStringSubmatch(remaining[nextIdx:])
+			if len(matches) > 1 {
+				// Push current style to stack
+				styleStack = append(styleStack, currentStyle)
+				// Parse size
+				sizeStr := matches[1]
+				currentStyle.fontSize = parseSize(sizeStr)
+			}
+			remaining = remaining[nextIdx+len(matches[0]):]
+
+		case "color_close", "size_close":
+			// Pop from stack
+			if len(styleStack) > 0 {
+				// Pop the last style
+				currentStyle = styleStack[len(styleStack)-1]
+				styleStack = styleStack[:len(styleStack)-1]
+			}
+			if markerType == "color_close" {
+				remaining = remaining[nextIdx+len("[/COLOR]"):]
+			} else {
+				remaining = remaining[nextIdx+len("[/SIZE]"):]
+			}
+		}
+	}
+
+	return segments
+}
+
+// parseColor converts various color formats to PDF RGB format "R G B"
+func parseColor(colorStr string) string {
+	// Default black
+	defaultColor := "0 0 0"
+
+	// Trim whitespace
+	colorStr = strings.TrimSpace(colorStr)
+
+	// Hex format: #RRGGBB
+	if strings.HasPrefix(colorStr, "#") && len(colorStr) == 7 {
+		r, err1 := strconv.ParseInt(colorStr[1:3], 16, 64)
+		g, err2 := strconv.ParseInt(colorStr[3:5], 16, 64)
+		b, err3 := strconv.ParseInt(colorStr[5:7], 16, 64)
+		if err1 == nil && err2 == nil && err3 == nil {
+			return fmt.Sprintf("%.3f %.3f %.3f", float64(r)/255.0, float64(g)/255.0, float64(b)/255.0)
+		}
+	}
+
+	// Hex format: #RGB (short)
+	if strings.HasPrefix(colorStr, "#") && len(colorStr) == 4 {
+		r, err1 := strconv.ParseInt(string(colorStr[1])+string(colorStr[1]), 16, 64)
+		g, err2 := strconv.ParseInt(string(colorStr[2])+string(colorStr[2]), 16, 64)
+		b, err3 := strconv.ParseInt(string(colorStr[3])+string(colorStr[3]), 16, 64)
+		if err1 == nil && err2 == nil && err3 == nil {
+			return fmt.Sprintf("%.3f %.3f %.3f", float64(r)/255.0, float64(g)/255.0, float64(b)/255.0)
+		}
+	}
+
+	// RGB format: rgb(r,g,b)
+	if strings.HasPrefix(colorStr, "rgb(") && strings.HasSuffix(colorStr, ")") {
+		inner := colorStr[4 : len(colorStr)-1]
+		parts := strings.Split(inner, ",")
+		if len(parts) == 3 {
+			r, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+			g, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+			b, err3 := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+			if err1 == nil && err2 == nil && err3 == nil {
+				// Assume 0-255 range
+				if r > 1 || g > 1 || b > 1 {
+					return fmt.Sprintf("%.3f %.3f %.3f", r/255.0, g/255.0, b/255.0)
+				}
+				return fmt.Sprintf("%.3f %.3f %.3f", r, g, b)
+			}
+		}
+	}
+
+	// Named colors
+	switch strings.ToLower(colorStr) {
+	case "red":
+		return "1 0 0"
+	case "green":
+		return "0 1 0"
+	case "blue":
+		return "0 0 1"
+	case "black":
+		return "0 0 0"
+	case "white":
+		return "1 1 1"
+	case "yellow":
+		return "1 1 0"
+	case "cyan":
+		return "0 1 1"
+	case "magenta":
+		return "1 0 1"
+	case "gray", "grey":
+		return "0.5 0.5 0.5"
+	}
+
+	return defaultColor
+}
+
+// parseSize converts size string (e.g., "14px", "12pt") to float64 points
+func parseSize(sizeStr string) float64 {
+	sizeStr = strings.TrimSpace(sizeStr)
+
+	// Remove px or pt suffix
+	sizeStr = strings.TrimSuffix(sizeStr, "px")
+	sizeStr = strings.TrimSuffix(sizeStr, "pt")
+
+	size, err := strconv.ParseFloat(sizeStr, 64)
+	if err != nil {
+		return 10.5 // Default size
+	}
+
+	return size
+}
+
+// estimateTextWidth estimates the width of text in mm based on font size
+func estimateTextWidth(text string, fontSize float64) float64 {
+	// Approximate: average char width is about 0.5 * fontSize in points
+	// 1 point = 0.3528 mm
+	charWidth := fontSize * 0.5 * 0.3528
+	return float64(len(text)) * charWidth
 }
