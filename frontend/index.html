@@ -87,7 +87,58 @@
             </div>
         </div>
         
+        <!-- Formatting Toolbar -->
+        <div id="formatting-toolbar">
+            <div class="toolbar-group">
+                <button id="btn-bold" class="toolbar-btn" title="Bold (Ctrl+B)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/>
+                        <path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/>
+                    </svg>
+                </button>
+                <button id="btn-italic" class="toolbar-btn" title="Italic (Ctrl+I)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <line x1="19" y1="4" x2="10" y2="4"/>
+                        <line x1="14" y1="20" x2="5" y2="20"/>
+                        <line x1="15" y1="4" x2="9" y2="20"/>
+                    </svg>
+                </button>
+                <button id="btn-underline" class="toolbar-btn" title="Underline (Ctrl+U)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/>
+                        <line x1="4" y1="21" x2="20" y2="21"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="toolbar-separator"></div>
+            <div class="toolbar-group">
+                <select id="select-heading" class="toolbar-select" title="Heading Style">
+                    <option value="p">Normal</option>
+                    <option value="h1">Heading 1</option>
+                    <option value="h2">Heading 2</option>
+                    <option value="h3">Heading 3</option>
+                </select>
+            </div>
+            <div class="toolbar-separator"></div>
+            <div class="toolbar-group">
+                <select id="select-fontsize" class="toolbar-select" title="Font Size">
+                    <option value="12">12px</option>
+                    <option value="14" selected>14px</option>
+                    <option value="16">16px</option>
+                    <option value="18">18px</option>
+                    <option value="20">20px</option>
+                    <option value="24">24px</option>
+                    <option value="32">32px</option>
+                </select>
+            </div>
+            <div class="toolbar-separator"></div>
+            <div class="toolbar-group">
+                <input type="color" id="select-color" class="toolbar-color" value="#e8e8e8" title="Text Color">
+            </div>
+        </div>
+        
         <!-- Main Content -->
+
         <div id="main-content">
             <!-- Editor Container -->
             <div id="editor-container"></div>
