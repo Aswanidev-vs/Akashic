@@ -772,6 +772,11 @@ class AkashicEditor {
         // Format current block as heading or paragraph
         const selection = window.getSelection();
         if (selection.rangeCount === 0) return;
+
+        // Allow only expected block tags from the heading control.
+        const allowedTags = new Set(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+        const normalizedTagName = typeof tagName === 'string' ? tagName.toLowerCase() : '';
+        const safeTagName = allowedTags.has(normalizedTagName) ? normalizedTagName : 'p';
         
         const range = selection.getRangeAt(0);
         let node = range.commonAncestorContainer;
@@ -783,12 +788,12 @@ class AkashicEditor {
         
         if (!node || node === document.body) {
             // No block found, use formatBlock command
-            document.execCommand('formatBlock', false, tagName);
+            document.execCommand('formatBlock', false, safeTagName);
             return;
         }
         
         // Create new element
-        const newElement = document.createElement(tagName);
+        const newElement = document.createElement(safeTagName);
         
         // Copy content
         newElement.innerHTML = node.innerHTML;
