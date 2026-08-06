@@ -1,8 +1,8 @@
 build/bin
-node_modules
+node_modules/
 TODO.md
 
-
+.mimocode/
 #Ignore vscode AI rules
 .github\instructions\codacy.instructions.md
 security_audit/

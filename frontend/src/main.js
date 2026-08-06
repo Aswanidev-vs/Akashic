@@ -1,5 +1,24 @@
 import './style.css';
-import './app.css';
+
+// Inline SVG icon system — the only iconography in the UI (no emoji, no glyphs).
+const ICONS = {
+    x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+    pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+    floppy: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+    trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+    alert: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+    bulb: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z"/>',
+    pen: '<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+    doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+    check: '<polyline points="20 6 9 17 4 12"/>',
+    orbit: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="5.5" ry="9"/><path d="M12 3v18"/><path d="M7 6c3 1.5 3 10.5 0 12M17 6c-3 1.5-3 10.5 0 12"/>',
+    info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>'
+};
+
+function svgIcon(name, size = 15) {
+    return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+}
 
 // Wails bindings
 import {
@@ -146,8 +165,8 @@ class AkashicEditor {
         if (this.chats.length === 0) {
             this.elements.chatList.innerHTML = `
                 <div class="chat-empty">
-                    <p>No chats yet</p>
-                    <span>Start a new conversation</span>
+                    <p>No records yet</p>
+                    <span>Begin a conversation</span>
                 </div>
             `;
             return;
@@ -195,6 +214,24 @@ class AkashicEditor {
         });
     }
     
+    renderWelcome(showSuggestions = true) {
+        const suggestions = showSuggestions ? `
+            <div class="ai-suggestions">
+                <button class="ai-suggestion" data-prompt="Explain this code">${svgIcon('bulb', 13)} Explain code</button>
+                <button class="ai-suggestion" data-prompt="Rewrite this to be more professional">${svgIcon('pen', 13)} Rewrite</button>
+                <button class="ai-suggestion" data-prompt="Summarize this text">${svgIcon('doc', 13)} Summarize</button>
+                <button class="ai-suggestion" data-prompt="Fix grammar and spelling">${svgIcon('check', 13)} Fix grammar</button>
+            </div>` : '';
+        return `
+            <div class="ai-welcome">
+                <span class="ai-welcome-icon">${svgIcon('orbit', 34)}</span>
+                <h3>Begin a record</h3>
+                <p>A local model helps you write, edit, explain, and summarize. Nothing leaves this machine.</p>
+                ${suggestions}
+            </div>
+        `;
+    }
+
     async createNewChat() {
         try {
             const title = 'New Chat';
@@ -204,19 +241,7 @@ class AkashicEditor {
             
             // Clear messages
             const messagesDiv = document.getElementById('ai-messages');
-            messagesDiv.innerHTML = `
-                <div class="ai-welcome">
-                    <div class="ai-welcome-icon">🤖</div>
-                    <h3>How can I help you today?</h3>
-                    <p>I can help you write, edit, explain code, summarize text, and more.</p>
-                    <div class="ai-suggestions">
-                        <button class="ai-suggestion" data-prompt="Explain this code">💡 Explain code</button>
-                        <button class="ai-suggestion" data-prompt="Rewrite this to be more professional">✍️ Rewrite professionally</button>
-                        <button class="ai-suggestion" data-prompt="Summarize this text">📝 Summarize</button>
-                        <button class="ai-suggestion" data-prompt="Fix grammar and spelling">🔧 Fix grammar</button>
-                    </div>
-                </div>
-            `;
+            messagesDiv.innerHTML = this.renderWelcome(true);
             
             // Re-attach suggestion listeners
             messagesDiv.querySelectorAll('.ai-suggestion').forEach(btn => {
@@ -249,13 +274,7 @@ class AkashicEditor {
             
             if (messages.length === 0) {
                 // Show welcome if no messages
-                messagesDiv.innerHTML = `
-                    <div class="ai-welcome">
-                        <div class="ai-welcome-icon">🤖</div>
-                        <h3>How can I help you today?</h3>
-                        <p>I can help you write, edit, explain code, summarize text, and more.</p>
-                    </div>
-                `;
+                messagesDiv.innerHTML = this.renderWelcome(true);
             } else {
                 // Render messages
                 messages.forEach(msg => {
@@ -304,12 +323,7 @@ class AkashicEditor {
                         this.currentChatId = null;
                         // Clear messages
                         const messagesDiv = document.getElementById('ai-messages');
-                        messagesDiv.innerHTML = `
-                            <div class="ai-welcome">
-                                <div class="ai-welcome-icon">🤖</div>
-                                <h3>How can I help you today?</h3>
-                            </div>
-                        `;
+                        messagesDiv.innerHTML = this.renderWelcome(true);
                         this.updateChatInfo();
                     }
                     
@@ -337,12 +351,7 @@ class AkashicEditor {
                     
                     // Clear messages
                     const messagesDiv = document.getElementById('ai-messages');
-                    messagesDiv.innerHTML = `
-                        <div class="ai-welcome">
-                            <div class="ai-welcome-icon">🤖</div>
-                            <h3>How can I help you today?</h3>
-                        </div>
-                    `;
+                    messagesDiv.innerHTML = this.renderWelcome(true);
                     
                     this.renderChatList();
                     this.updateChatInfo();
@@ -402,16 +411,15 @@ class AkashicEditor {
             dialog.className = 'dialog hidden';
             dialog.style.width = '350px';
             dialog.innerHTML = `
-                <div class="dialog-header" style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 20px;">✏️</span>
-                    <span>Rename Chat</span>
+                <div class="dialog-header">
+                    <span class="dialog-heading">${svgIcon('pencil', 14)} Rename Chat</span>
                 </div>
-                <div class="dialog-body" style="padding: 20px;">
-                    <input type="text" id="rename-chat-input" placeholder="Enter chat name..." style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-tertiary); color: var(--text-primary); font-size: 14px;">
+                <div class="dialog-body" style="padding: 18px 20px;">
+                    <input type="text" id="rename-chat-input" placeholder="Enter chat name...">
                 </div>
-                <div class="dialog-footer" style="justify-content: flex-end; gap: 10px; padding: 15px 20px;">
-                    <button id="rename-chat-cancel" style="padding: 6px 16px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">Cancel</button>
-                    <button id="rename-chat-save" style="padding: 6px 16px; background: var(--accent-color); color: white; border: none; border-radius: 4px; cursor: pointer;">Save</button>
+                <div class="dialog-footer">
+                    <button id="rename-chat-cancel">Cancel</button>
+                    <button id="rename-chat-save" class="primary">Save</button>
                 </div>
             `;
             this.elements.dialogOverlay.appendChild(dialog);
@@ -539,13 +547,13 @@ class AkashicEditor {
         tabElement.className = 'tab';
         tabElement.dataset.tabId = tab.id;
         tabElement.innerHTML = `
-            <span class="tab-dirty" style="display: none;">●</span>
+            <span class="tab-dirty" style="display: none;"></span>
             <span class="tab-name">${tab.fileInfo.Name}</span>
-            <span class="tab-close">×</span>
+            <span class="tab-close">${svgIcon('x', 12)}</span>
         `;
         
         tabElement.addEventListener('click', (e) => {
-            if (e.target.classList.contains('tab-close')) {
+            if (e.target.closest('.tab-close')) {
                 this.closeTab(tab.id);
             } else {
                 this.switchToTab(tab.id);
@@ -807,7 +815,7 @@ class AkashicEditor {
         if (!tab.fileInfo.IsDirty) {
             tab.fileInfo.IsDirty = true;
             const dirtyIndicator = tab.element.querySelector('.tab-dirty');
-            if (dirtyIndicator) dirtyIndicator.style.display = 'inline';
+            if (dirtyIndicator) dirtyIndicator.style.display = 'inline-block';
         }
         
         // Notify backend if available
@@ -1441,7 +1449,7 @@ class AkashicEditor {
             dialog.innerHTML = `
                 <div class="dialog-header">
                     <span>${showReplace ? 'Find and Replace' : 'Find'}</span>
-                    <button id="find-close" style="background: none; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer;">×</button>
+                    <button id="find-close" class="icon-btn" aria-label="Close">${svgIcon('x', 14)}</button>
                 </div>
                 <div class="dialog-body">
                     <div class="find-replace-row">
@@ -1846,23 +1854,22 @@ class AkashicEditor {
             dialog.className = 'dialog dialog-confirm hidden';
             dialog.style.width = '400px';
             dialog.innerHTML = `
-                <div class="dialog-header" id="save-confirm-title" style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 20px;">💾</span>
-                    <span>Unsaved Changes</span>
+                <div class="dialog-header" id="save-confirm-title">
+                    <span class="dialog-heading">${svgIcon('floppy', 15)} <span id="save-confirm-heading-text">Unsaved Changes</span></span>
                 </div>
-                <div class="dialog-body" id="save-confirm-message" style="padding: 20px; text-align: center;">
+                <div class="dialog-body" id="save-confirm-message" style="padding: 22px 20px; text-align: center;">
                     Save changes?
                 </div>
-                <div class="dialog-footer" style="justify-content: center; gap: 10px; padding: 15px 20px;">
-                    <button id="save-confirm-save" class="btn-primary" style="padding: 8px 20px; background: var(--accent-color); color: white; border: none; border-radius: 4px; cursor: pointer;">Save</button>
-                    <button id="save-confirm-dontsave" style="padding: 8px 20px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">Don't Save</button>
-                    <button id="save-confirm-cancel" style="padding: 8px 20px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">Cancel</button>
+                <div class="dialog-footer" style="justify-content: center;">
+                    <button id="save-confirm-save" class="primary">Save</button>
+                    <button id="save-confirm-dontsave">Don't Save</button>
+                    <button id="save-confirm-cancel">Cancel</button>
                 </div>
             `;
             this.elements.dialogOverlay.appendChild(dialog);
         }
         
-        document.getElementById('save-confirm-title').innerHTML = `<span style="font-size: 20px;">💾</span><span>${title}</span>`;
+        document.getElementById('save-confirm-heading-text').textContent = title;
         document.getElementById('save-confirm-message').textContent = message;
         
         dialog.classList.remove('hidden');
@@ -1906,16 +1913,15 @@ class AkashicEditor {
             dialog.className = 'dialog dialog-confirm hidden';
             dialog.style.width = '380px';
             dialog.innerHTML = `
-                <div class="dialog-header" id="styled-confirm-title" style="display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color);">
-                    <span id="styled-confirm-icon" style="font-size: 20px;">⚠️</span>
-                    <span id="styled-confirm-header-text">Confirm</span>
+                <div class="dialog-header" id="styled-confirm-title">
+                    <span class="dialog-heading"><span id="styled-confirm-icon">${svgIcon('alert', 16)}</span> <span id="styled-confirm-header-text">Confirm</span></span>
                 </div>
-                <div class="dialog-body" id="styled-confirm-message" style="padding: 25px 20px; text-align: center; font-size: 14px; line-height: 1.5;">
+                <div class="dialog-body" id="styled-confirm-message" style="padding: 22px 20px; text-align: center;">
                     Are you sure?
                 </div>
-                <div class="dialog-footer" style="justify-content: center; gap: 12px; padding: 15px 20px;">
-                    <button id="styled-confirm-yes" class="btn-danger" style="padding: 8px 20px; background: var(--error-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Delete</button>
-                    <button id="styled-confirm-no" style="padding: 8px 20px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">Cancel</button>
+                <div class="dialog-footer" style="justify-content: center;">
+                    <button id="styled-confirm-yes" class="primary">Delete</button>
+                    <button id="styled-confirm-no">Cancel</button>
                 </div>
             `;
             this.elements.dialogOverlay.appendChild(dialog);
@@ -1923,10 +1929,9 @@ class AkashicEditor {
         
         // Update content
         const isDelete = confirmText.toLowerCase().includes('delete');
-        const icon = isDelete ? '🗑️' : '⚠️';
-        const btnClass = isDelete ? 'var(--error-color)' : 'var(--accent-color)';
         
-        document.getElementById('styled-confirm-icon').textContent = icon;
+        document.getElementById('styled-confirm-icon').innerHTML = isDelete ? svgIcon('trash', 16) : svgIcon('alert', 16);
+        document.getElementById('styled-confirm-icon').style.color = isDelete ? 'var(--brick)' : 'var(--ember)';
         document.getElementById('styled-confirm-header-text').textContent = title;
         document.getElementById('styled-confirm-message').textContent = message;
         
@@ -1934,7 +1939,8 @@ class AkashicEditor {
         const noBtn = document.getElementById('styled-confirm-no');
         
         yesBtn.textContent = confirmText;
-        yesBtn.style.background = btnClass;
+        yesBtn.classList.toggle('primary', !isDelete);
+        yesBtn.classList.toggle('danger', isDelete);
         noBtn.textContent = cancelText;
         
         dialog.classList.remove('hidden');
@@ -2204,17 +2210,17 @@ class AkashicEditor {
             dialog.style.width = '450px';
             dialog.innerHTML = `
                 <div class="dialog-header">About Akashic</div>
-                <div class="dialog-body" style="text-align: center; padding: 30px;">
-                    <img src="./logo.png" alt="Akashic Logo" style="width: 80px; height: 80px; margin-bottom: 20px; border-radius: 8px;">
-                    <h2 style="margin-bottom: 10px; color: var(--accent-color);">Akashic Editor</h2>
-                    <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 20px;">v0.2.0</p>
-                    <p style="font-size: 13px; line-height: 1.6; margin-bottom: 20px;">
-                        Akashic is an AI-enhanced text editor built with Wails and modern web technologies.
-                        Designed for developers who want a lightweight yet powerful editing experience.
+                <div class="dialog-body about-body">
+                   
+                    <h2 class="about-name">Akashic</h2>
+                    <p class="about-version">v0.2.0</p>
+                    <p class="about-copy">
+                        An AI-enhanced writing instrument built with Wails.
+                        Your notes and models run entirely on this machine.
                     </p>
                 </div>
                 <div class="dialog-footer" style="justify-content: center;">
-                    <button id="about-close" style="padding: 8px 24px;">Close</button>
+                    <button id="about-close" class="primary">Close</button>
                 </div>
             `;
             this.elements.dialogOverlay.appendChild(dialog);
@@ -2240,11 +2246,11 @@ class AkashicEditor {
             dialog.innerHTML = `
                 <div class="dialog-header">Keyboard Shortcuts</div>
                 <div class="dialog-body" style="padding: 0; max-height: 400px; overflow-y: auto;">
-                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-                        <thead style="position: sticky; top: 0; background: var(--bg-secondary);">
+                    <table class="shortcuts-table">
+                        <thead>
                             <tr>
-                                <th style="text-align: left; padding: 10px 15px; border-bottom: 1px solid var(--border-color);">Action</th>
-                                <th style="text-align: left; padding: 10px 15px; border-bottom: 1px solid var(--border-color);">Shortcut</th>
+                                <th>Action</th>
+                                <th>Shortcut</th>
                             </tr>
                         </thead>
                         <tbody id="shortcuts-list">
@@ -2294,7 +2300,6 @@ class AkashicEditor {
         
         for (const [name, shortcut] of Object.entries(this.shortcuts)) {
             const row = document.createElement('tr');
-            row.style.borderBottom = '1px solid var(--border-color)';
             
             const displayShortcut = [];
             if (shortcut.ctrl) displayShortcut.push('Ctrl');
@@ -2302,12 +2307,8 @@ class AkashicEditor {
             displayShortcut.push(shortcut.key.toUpperCase());
             
             row.innerHTML = `
-                <td style="padding: 8px 15px; color: var(--text-primary);">${shortcutNames[name] || name}</td>
-                <td style="padding: 8px 15px;">
-                    <kbd style="background: var(--bg-tertiary); padding: 2px 6px; border-radius: 3px; font-family: monospace; font-size: 12px;">
-                        ${displayShortcut.join('+')}
-                    </kbd>
-                </td>
+                <td>${shortcutNames[name] || name}</td>
+                <td><kbd>${displayShortcut.join('+')}</kbd></td>
             `;
             tbody.appendChild(row);
         }
@@ -2577,14 +2578,14 @@ class AkashicEditor {
         if (running) {
             statusIndicator.className = 'status-dot online';
             statusText.textContent = 'Server running';
-            statusText.style.color = 'var(--success-color)';
+            statusText.style.color = 'var(--phosphor)';
             if (startBtn) {
                 startBtn.classList.add('hidden');
             }
         } else {
             statusIndicator.className = 'status-dot offline';
             statusText.textContent = 'Server not running';
-            statusText.style.color = 'var(--error-color)';
+            statusText.style.color = 'var(--brick)';
             if (startBtn) {
                 startBtn.classList.remove('hidden');
             }
@@ -2638,7 +2639,7 @@ class AkashicEditor {
         // Add AI response placeholder
         const aiMsgDiv = document.createElement('div');
         aiMsgDiv.className = 'ai-message assistant';
-        aiMsgDiv.innerHTML = '<div class="ai-message-content" style="color: var(--text-secondary); font-style: italic;">Generating...</div>';
+        aiMsgDiv.innerHTML = '<div class="ai-message-content" style="color: var(--paper-dim); font-style: italic;">Generating...</div>';
         messagesDiv.appendChild(aiMsgDiv);
         
         // Clear input
@@ -2676,7 +2677,7 @@ class AkashicEditor {
         } catch (err) {
             console.error('Generation failed:', err);
             const safeErrorMessage = this.escapeHtml(err && err.message ? String(err.message) : String(err));
-            aiMsgDiv.innerHTML = `<div class="ai-message-content" style="color: var(--error-color);">Error: ${safeErrorMessage}</div>`;
+            aiMsgDiv.innerHTML = `<div class="ai-message-content" style="color: var(--brick);">Error: ${safeErrorMessage}</div>`;
         }
         
         // Scroll to bottom again
